@@ -96,13 +96,24 @@ const AdList = ({ ads, onRefresh }) => {
         stack: error.stack
       });
       
+      // 백엔드 에러 메시지 표시
+      let errorMessage = 'Failed to delete ad: ' + error.message;
+      
       // 활성 스케줄이 있는 경우 특별한 메시지 표시
-      if (error.response?.status === 400 && error.response?.data?.error?.includes('active schedules')) {
-        const activeSchedules = error.response.data.active_schedules || 0;
-        alert(`Cannot delete ad: ${activeSchedules} active schedule(s) are using this ad.\n\nPlease delete or complete the schedules first.`);
-      } else {
-        alert('Failed to delete ad: ' + error.message);
+      if (error.response?.status === 400) {
+        const errorData = error.response.data;
+        
+        if (errorData?.error?.includes('active schedules')) {
+          const activeSchedules = errorData.active_schedules || 0;
+          errorMessage = `Cannot delete ad: ${activeSchedules} active schedule(s) are using this ad.\n\nPlease delete or complete the schedules first.`;
+        } else if (errorData?.error) {
+          errorMessage = `Delete failed: ${errorData.error}`;
+        } else {
+          errorMessage = `Delete failed: Bad Request (400)\n\nThis might be due to:\n• API endpoint not properly configured\n• Active schedules using this ad\n• Server-side validation error\n\nPlease check the console for more details.`;
+        }
       }
+      
+      alert(errorMessage);
     }
   };
 
@@ -668,6 +679,9 @@ const AdList = ({ ads, onRefresh }) => {
         </div>
       )}
 
+      {/* 페이지네이션을 통계 섹션 위로 이동 */}
+      {renderPagination()}
+
       <div className="ad-summary">
         <div className="summary-stats">
           <div className="stat">
@@ -698,8 +712,6 @@ const AdList = ({ ads, onRefresh }) => {
           <li>Ad length must match actual video length</li>
         </ul>
       </div>
-
-      {renderPagination()}
     </div>
   );
 };

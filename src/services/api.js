@@ -45,12 +45,29 @@ export const adAPI = {
   toggleAdStatus: async (adId, currentActive) => {
     try {
       const newActive = currentActive === "true" ? "false" : "true";
+      console.log('Toggling ad status:', { adId, currentActive, newActive });
+      console.log('PUT URL:', `${API_BASE_URL}/api/ads/${adId}/status`);
+      console.log('Request body:', { active: newActive });
+      
       const response = await api.put(`/api/ads/${adId}/status`, {
         active: newActive
       });
+      console.log('Toggle response:', response);
       return response.data;
     } catch (error) {
       console.error('Error toggling ad status:', error);
+      console.error('Error response:', error.response);
+      console.error('Error response data:', error.response?.data);
+      console.error('Error response status:', error.response?.status);
+      console.error('Error response headers:', error.response?.headers);
+      
+      // 백엔드에서 온 에러 메시지를 포함하여 다시 throw
+      if (error.response?.data) {
+        const backendError = new Error(error.response.data.error || error.response.data.message || error.message);
+        backendError.response = error.response;
+        throw backendError;
+      }
+      
       throw error;
     }
   },
@@ -58,10 +75,26 @@ export const adAPI = {
   // 광고 삭제
   deleteAd: async (adId) => {
     try {
+      console.log('Deleting ad with ID:', adId);
+      console.log('DELETE URL:', `${API_BASE_URL}/api/ads/${adId}`);
+      
       const response = await api.delete(`/api/ads/${adId}`);
+      console.log('Delete response:', response);
       return response.data;
     } catch (error) {
       console.error('Error deleting ad:', error);
+      console.error('Error response:', error.response);
+      console.error('Error response data:', error.response?.data);
+      console.error('Error response status:', error.response?.status);
+      console.error('Error response headers:', error.response?.headers);
+      
+      // 백엔드에서 온 에러 메시지를 포함하여 다시 throw
+      if (error.response?.data) {
+        const backendError = new Error(error.response.data.error || error.response.data.message || error.message);
+        backendError.response = error.response;
+        throw backendError;
+      }
+      
       throw error;
     }
   }

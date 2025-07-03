@@ -2052,37 +2052,100 @@
 /* Ad Management 개선 - 페이지네이션 스타일 */
 .pagination {
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
-  margin-top: 1.5rem;
-  padding: 1rem;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  margin: 30px 0;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.pagination-info {
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 0.9rem;
+.pagination-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  min-width: 80px;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.pagination-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.page-numbers {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 10px;
+}
+
+.page-number {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  min-width: 40px;
+  text-align: center;
+}
+
+.page-number:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.page-number.active {
+  background: linear-gradient(135deg, #007AFF, #5856D6);
+  border-color: #007AFF;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
+}
+
+.page-ellipsis {
+  color: rgba(255, 255, 255, 0.6);
+  padding: 8px 4px;
+  font-size: 14px;
   font-weight: 500;
 }
 
-.pagination-buttons {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.pagination-buttons .btn {
-  min-width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  font-weight: 600;
-}
-
-.pagination-buttons .btn.active {
-  background: #007AFF;
-  color: white;
-  border-color: #007AFF;
+/* 모바일 반응형 */
+@media (max-width: 768px) {
+  .pagination {
+    gap: 6px;
+    margin: 20px 0;
+  }
+  
+  .pagination-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+    min-width: 70px;
+  }
+  
+  .page-number {
+    padding: 6px 10px;
+    font-size: 13px;
+    min-width: 36px;
+  }
+  
+  .page-numbers {
+    gap: 2px;
+    margin: 0 6px;
+  }
 }
 
 /* Active 토글 버튼 스타일 */

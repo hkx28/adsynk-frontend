@@ -6,8 +6,7 @@ const AdList = ({ ads, onRefresh }) => {
   const [uploadForm, setUploadForm] = useState({
     title: '',
     advertiser: '',
-    duration: 30,
-    active: true  // category 제거, active 추가
+    duration: 30
   });
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -29,24 +28,42 @@ const AdList = ({ ads, onRefresh }) => {
     setCurrentPage(pageNumber);
   };
 
-  // Active 상태 토글 핸들러
+  // 광고 활성화 상태 토글 핸들러
   const handleToggleActive = async (adId, currentActive) => {
     try {
       console.log(`Toggle active for ad ${adId}: ${currentActive} -> ${currentActive === "true" ? "false" : "true"}`);
       
       const result = await adAPI.toggleAdStatus(adId, currentActive);
+      console.log('Toggle API response:', result); // 디버깅 로그 추가
       
-      if (result.ad_id) {
+      // 백엔드 응답 구조에 맞게 수정
+      if (result && (result.message || result.ad || result.success !== false)) {
         // 성공적으로 토글됨
         onRefresh(); // 광고 목록 새로고침
         
-        const newStatus = result.active === "true" ? "Active" : "Inactive";
+        // 응답에서 새로운 상태 확인 (여러 가능한 구조 지원)
+        let newActiveStatus;
+        if (result.ad && result.ad.active) {
+          newActiveStatus = result.ad.active;
+        } else if (result.active) {
+          newActiveStatus = result.active;
+        } else {
+          // 응답에 상태가 없으면 토글된 값으로 추정
+          newActiveStatus = currentActive === "true" ? "false" : "true";
+        }
+        
+        const newStatus = newActiveStatus === "true" ? "Active" : "Inactive";
         alert(`Ad status updated to ${newStatus}`);
       } else {
         throw new Error('Invalid response from server');
       }
     } catch (error) {
       console.error('Failed to toggle active status:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response,
+        stack: error.stack
+      });
       alert('Failed to toggle active status: ' + error.message);
     }
   };
@@ -61,8 +78,10 @@ const AdList = ({ ads, onRefresh }) => {
       console.log(`Delete ad ${adId}`);
       
       const result = await adAPI.deleteAd(adId);
+      console.log('Delete API response:', result); // 디버깅 로그 추가
       
-      if (result.ad_id) {
+      // 백엔드 응답 구조에 맞게 수정
+      if (result && (result.message || result.success !== false)) {
         // 성공적으로 삭제됨
         onRefresh(); // 광고 목록 새로고침
         alert('Ad deleted successfully');
@@ -71,6 +90,11 @@ const AdList = ({ ads, onRefresh }) => {
       }
     } catch (error) {
       console.error('Failed to delete ad:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response,
+        stack: error.stack
+      });
       
       // 활성 스케줄이 있는 경우 특별한 메시지 표시
       if (error.response?.status === 400 && error.response?.data?.error?.includes('active schedules')) {
@@ -84,10 +108,10 @@ const AdList = ({ ads, onRefresh }) => {
 
   // 업로드 폼 데이터 변경
   const handleUploadFormChange = (e) => {
-    const { name, value, type, checked } = e.target;
+    const { name, value } = e.target;
     setUploadForm(prev => ({
       ...prev,
-      [name]: type === 'checkbox' ? checked : value
+      [name]: value
     }));
   };
 
@@ -125,8 +149,7 @@ const AdList = ({ ads, onRefresh }) => {
       const adData = {
         title: uploadForm.title,
         advertiser: uploadForm.advertiser,
-        duration: parseInt(uploadForm.duration),
-        active: uploadForm.active
+        duration: parseInt(uploadForm.duration)
       };
 
       setUploadProgress('Generating presigned URL...');
@@ -191,8 +214,7 @@ const AdList = ({ ads, onRefresh }) => {
         setUploadForm({
           title: '',
           advertiser: '',
-          duration: 30,
-          active: true
+          duration: 30
         });
         setSelectedFile(null);
         setUploadStep(1);
@@ -250,6 +272,137 @@ const AdList = ({ ads, onRefresh }) => {
     } else {
       return 'Unknown';
     }
+  };
+
+  // 페이지네이션 렌더링 개선
+  const renderPagination = () => {
+    if (totalPages <= 1) return null;
+
+    const pageNumbers = [];
+    const maxVisiblePages = 5;
+    
+    if (totalPages <= maxVisiblePages) {
+      // 총 페이지가 5개 이하면 모든 페이지 번호 표시
+      for (let i = 1; i <= totalPages; i++) {
+        pageNumbers.push(
+          <button
+            key={i}
+            className={`page-number ${currentPage === i ? 'active' : ''}`}
+            onClick={() => handlePageChange(i)}
+          >
+            {i}
+          </button>
+        );
+      }
+    } else {
+      // 총 페이지가 5개를 넘으면 축약 표시
+      if (currentPage <= 3) {
+        // 현재 페이지가 앞쪽에 있을 때: 1,2,3,4,5...10
+        for (let i = 1; i <= 5; i++) {
+          pageNumbers.push(
+            <button
+              key={i}
+              className={`page-number ${currentPage === i ? 'active' : ''}`}
+              onClick={() => handlePageChange(i)}
+            >
+              {i}
+            </button>
+          );
+        }
+        if (totalPages > 5) {
+          pageNumbers.push(<span key="ellipsis1" className="page-ellipsis">...</span>);
+          pageNumbers.push(
+            <button
+              key={totalPages}
+              className="page-number"
+              onClick={() => handlePageChange(totalPages)}
+            >
+              {totalPages}
+            </button>
+          );
+        }
+      } else if (currentPage >= totalPages - 2) {
+        // 현재 페이지가 뒤쪽에 있을 때: 1...6,7,8,9,10
+        pageNumbers.push(
+          <button
+            key={1}
+            className="page-number"
+            onClick={() => handlePageChange(1)}
+          >
+            1
+          </button>
+        );
+        pageNumbers.push(<span key="ellipsis2" className="page-ellipsis">...</span>);
+        for (let i = totalPages - 4; i <= totalPages; i++) {
+          pageNumbers.push(
+            <button
+              key={i}
+              className={`page-number ${currentPage === i ? 'active' : ''}`}
+              onClick={() => handlePageChange(i)}
+            >
+              {i}
+            </button>
+          );
+        }
+      } else {
+        // 현재 페이지가 중간에 있을 때: 1...4,5,6...10
+        pageNumbers.push(
+          <button
+            key={1}
+            className="page-number"
+            onClick={() => handlePageChange(1)}
+          >
+            1
+          </button>
+        );
+        pageNumbers.push(<span key="ellipsis3" className="page-ellipsis">...</span>);
+        for (let i = currentPage - 1; i <= currentPage + 1; i++) {
+          pageNumbers.push(
+            <button
+              key={i}
+              className={`page-number ${currentPage === i ? 'active' : ''}`}
+              onClick={() => handlePageChange(i)}
+            >
+              {i}
+            </button>
+          );
+        }
+        pageNumbers.push(<span key="ellipsis4" className="page-ellipsis">...</span>);
+        pageNumbers.push(
+          <button
+            key={totalPages}
+            className="page-number"
+            onClick={() => handlePageChange(totalPages)}
+          >
+            {totalPages}
+          </button>
+        );
+      }
+    }
+
+    return (
+      <div className="pagination">
+        <button
+          className="pagination-btn"
+          onClick={() => handlePageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+        >
+          ← Previous
+        </button>
+        
+        <div className="page-numbers">
+          {pageNumbers}
+        </div>
+        
+        <button
+          className="pagination-btn"
+          onClick={() => handlePageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+        >
+          Next →
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -357,22 +510,6 @@ const AdList = ({ ads, onRefresh }) => {
                     >
                       60sec
                     </button>
-                  </div>
-                </div>
-                
-                <div className="form-group">
-                  <label htmlFor="active">Active Status</label>
-                  <div className="active-toggle-form">
-                    <input
-                      type="checkbox"
-                      id="active"
-                      name="active"
-                      checked={uploadForm.active}
-                      onChange={handleUploadFormChange}
-                    />
-                    <label htmlFor="active" className="toggle-label">
-                      {uploadForm.active ? '✅ Active (will be available for scheduling)' : '⏸️ Inactive (will not be available for scheduling)'}
-                    </label>
                   </div>
                 </div>
               </div>
@@ -562,24 +699,7 @@ const AdList = ({ ads, onRefresh }) => {
         </ul>
       </div>
 
-      {totalPages > 1 && (
-        <div className="pagination">
-          <div className="pagination-info">
-            Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, ads.length)} of {ads.length} ads
-          </div>
-          <div className="pagination-buttons">
-            {Array.from({ length: totalPages }, (_, i) => (
-              <button
-                key={i + 1}
-                className={`btn btn-secondary ${currentPage === i + 1 ? 'active' : ''}`}
-                onClick={() => handlePageChange(i + 1)}
-              >
-                {i + 1}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {renderPagination()}
     </div>
   );
 };

@@ -134,9 +134,16 @@ export const scheduleAPI = {
     let errors = [];
 
     try {
-      // 1. DynamoDB에 스케줄 저장
-      console.log('Creating DynamoDB schedule...', scheduleData);
-      dynamodbResult = await api.post('/api/schedule', scheduleData);
+      // 1. DynamoDB에 스케줄 저장 - 백엔드 API 필드명에 맞게 변환
+      const apiScheduleData = {
+        adId: scheduleData.ad_id,
+        scheduleTime: scheduleData.schedule_time,  // camelCase로 변환
+        eventName: scheduleData.event_name,
+        duration: scheduleData.duration
+      };
+      
+      console.log('Creating DynamoDB schedule...', apiScheduleData);
+      dynamodbResult = await api.post('/api/schedule', apiScheduleData);
       
       // 2. MediaLive 설정 확인
       const mediaLiveConfig = localStorage.getItem('mediaLiveConfig');

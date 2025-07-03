@@ -64,20 +64,28 @@ const AdList = ({ ads, onRefresh }) => {
       setUploadProgress('Generating presigned URL...');
       const response = await adAPI.createAd(adData);
       
-      if (response.presigned_url) {
+      // 실제 API 응답 구조에 맞게 수정: upload_url 사용
+      if (response.upload_url && response.ad_id) {
         // 2단계로 이동
         setUploadStep(2);
         setUploadProgress('Ad information saved. Please select video file.');
         
         // presigned URL 저장
-        window.currentPresignedUrl = response.presigned_url;
+        window.currentPresignedUrl = response.upload_url;
         window.currentAdId = response.ad_id;
+        
+        // 성공 시 uploading 상태 해제
+        setUploading(false);
+      } else {
+        throw new Error('Invalid response: missing upload_url or ad_id');
       }
     } catch (error) {
       console.error('Create ad error:', error);
       alert('Failed to create ad: ' + error.message);
       setUploading(false);
       setUploadProgress(null);
+      // 오류 시 1단계 유지
+      setUploadStep(1);
     }
   };
 

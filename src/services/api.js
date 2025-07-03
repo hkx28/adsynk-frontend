@@ -2,7 +2,7 @@ import axios from 'axios';
 import mediaLiveAPI from './mediaLiveAPI';
 
 // API 기본 설정
-const API_BASE_URL = 'https://ec5nkbfrc5.execute-api.ap-northeast-2.amazonaws.com/prod';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://ec5nkbfrc5.execute-api.ap-northeast-2.amazonaws.com/prod';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -19,89 +19,13 @@ export const adAPI = {
       const response = await api.get('/api/ads');
       const ads = response.data.ads || [];
       
-      // 로컬 테스트: API 성공했지만 활성 광고가 없는 경우 더미 데이터 사용
-      const activeAds = ads.filter(ad => ad.status === 'active' || ad.active === 'true');
-      
-      if (activeAds.length === 0) {
-        console.log('No active ads found, using dummy ad data for local testing...');
-        return [
-          {
-            ad_id: 'test-ad-001',
-            title: 'Sample Ad 30sec',
-            advertiser: 'Test Advertiser',
-            duration: 30,
-            category: 'General',
-            status: 'active',
-            active: 'true',
-            created_at: '2025-01-07T10:00:00Z',
-            url: 'https://example.com/sample-ad-30sec.mp4'
-          },
-          {
-            ad_id: 'test-ad-002', 
-            title: 'Demo Commercial 15sec',
-            advertiser: 'Demo Company',
-            duration: 15,
-            category: 'Technology',
-            status: 'active',
-            active: 'true',
-            created_at: '2025-01-07T10:30:00Z',
-            url: 'https://example.com/demo-commercial-15sec.mp4'
-          },
-          {
-            ad_id: 'test-ad-003',
-            title: 'Product Showcase 60sec',
-            advertiser: 'Joseph Corp',
-            duration: 60,
-            category: 'Marketing',
-            status: 'active',
-            active: 'true',
-            created_at: '2025-01-07T11:00:00Z',
-            url: 'https://example.com/product-showcase-60sec.mp4'
-          }
-        ];
-      }
+      console.log('API Response:', response.data);
+      console.log('Raw ads data:', ads);
       
       return ads;
     } catch (error) {
       console.error('Error fetching ads:', error);
-      
-      // 로컬 테스트용 더미 데이터 (API 실패 시)
-      console.log('API failed, using dummy ad data for local testing...');
-      return [
-        {
-          ad_id: 'test-ad-001',
-          title: 'Sample Ad 30sec',
-          advertiser: 'Test Advertiser',
-          duration: 30,
-          category: 'General',
-          status: 'active',
-          active: 'true',
-          created_at: '2025-01-07T10:00:00Z',
-          url: 'https://example.com/sample-ad-30sec.mp4'
-        },
-        {
-          ad_id: 'test-ad-002', 
-          title: 'Demo Commercial 15sec',
-          advertiser: 'Demo Company',
-          duration: 15,
-          category: 'Technology',
-          status: 'active',
-          active: 'true',
-          created_at: '2025-01-07T10:30:00Z',
-          url: 'https://example.com/demo-commercial-15sec.mp4'
-        },
-        {
-          ad_id: 'test-ad-003',
-          title: 'Product Showcase 60sec',
-          advertiser: 'Joseph Corp',
-          duration: 60,
-          category: 'Marketing',
-          status: 'active',
-          active: 'true',
-          created_at: '2025-01-07T11:00:00Z',
-          url: 'https://example.com/product-showcase-60sec.mp4'
-        }
-      ];
+      throw error;
     }
   },
 
@@ -161,41 +85,12 @@ export const analyticsAPI = {
       return { success: true };
     } catch (error) {
       console.error('Error exporting CSV:', error);
-      
-      // 개발 환경에서 API 실패 시 더미 CSV 생성
-      console.log('API failed, generating dummy CSV for development...');
-      const dummyCSV = generateDummyCSV(startDate, endDate);
-      downloadCSV(dummyCSV, `ad_analytics_${startDate}_to_${endDate}.csv`);
-      
-      return { success: true, dummy: true };
+      throw error;
     }
   }
 };
 
-// 더미 CSV 생성 함수 (개발용)
-const generateDummyCSV = (startDate, endDate) => {
-  const headers = ['광고ID', '광고명', '광고사업자', '삽입횟수', '성공횟수', '실패횟수', '성공률(%)', '총지속시간(초)'];
-  const dummyData = [
-    ['ad_001', 'Sample Ad 30sec', 'Test Advertiser', '15', '14', '1', '93.3', '450'],
-    ['ad_002', 'Demo Commercial 15sec', 'Demo Company', '8', '7', '1', '87.5', '120'],
-    ['ad_003', 'Product Showcase 60sec', 'Joseph Corp', '12', '11', '1', '91.7', '720']
-  ];
-  
-  return [headers, ...dummyData].map(row => row.join(',')).join('\n');
-};
 
-// CSV 다운로드 헬퍼 함수
-const downloadCSV = (csvContent, filename) => {
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', filename);
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
-};
 
 // 스케줄 관련 API
 export const scheduleAPI = {

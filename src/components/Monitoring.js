@@ -375,17 +375,11 @@ const Monitoring = () => {
     console.log('Chart data:', data); // 디버깅용
 
     if (!data || data.length === 0) {
-      // 테스트용 더미 데이터
-      const dummyData = Array.from({ length: 9 }, (_, i) => ({
-        date: format(subDays(new Date(), 8 - i), 'yyyy-MM-dd'),
-        totalImpressions: Math.floor(Math.random() * 8) + 1,
-        successRate: '95.0',
-        uniqueAds: Math.floor(Math.random() * 5) + 1,
-        totalDuration: Math.floor(Math.random() * 300) + 100
-      }));
-      
-      console.log('Using dummy data:', dummyData);
-      data = dummyData;
+      return (
+        <div className="no-data-message">
+          <p>No data available for the selected period.</p>
+        </div>
+      );
     }
 
     const maxImpressions = Math.max(...data.map(d => d.totalImpressions || 0), 1);

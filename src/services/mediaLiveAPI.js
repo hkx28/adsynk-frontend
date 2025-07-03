@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // MediaLive API 기본 설정
-const MEDIALIVE_API_BASE = process.env.REACT_APP_API_BASE_URL || 'https://ec5nkbfrc5.execute-api.ap-northeast-2.amazonaws.com/prod';
+const MEDIALIVE_API_BASE = process.env.REACT_APP_API_URL || 'https://ec5nkbfrc5.execute-api.ap-northeast-2.amazonaws.com/prod';
 
 // MediaLive API 클라이언트 (단순화된 버전)
 const mediaLiveAPI = {

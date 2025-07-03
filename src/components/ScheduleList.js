@@ -15,8 +15,11 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
     const scheduleTime = parseISO(schedule.schedule_time);
     const now = new Date();
     
+    // 백엔드에서 명시적으로 completed로 설정된 경우
     if (schedule.status === 'completed') return 'completed';
-    if (isPast(scheduleTime)) return 'expired';
+    
+    // 스케줄 시간이 지났으면 성공적으로 완료된 것으로 처리
+    if (isPast(scheduleTime)) return 'completed';
     
     // 현재 시간이 스케줄 시간의 1분 이내인지 확인
     const isActive = isWithinInterval(now, {
@@ -61,13 +64,12 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
     }
   };
 
-  // 상태별 아이콘 렌더링 (텍스트 없이 아이콘만)
+  // 상태별 아이콘 렌더링 (expired 제거, completed로 통합)
   const renderStatusIcon = (status) => {
     const icons = {
       scheduled: '⏰',
       active: '🔴', 
-      completed: '✅',
-      expired: '❌'
+      completed: '✅'
     };
     
     return (
@@ -77,13 +79,12 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
     );
   };
 
-  // 상태 텍스트 반환
+  // 상태 텍스트 반환 (expired 제거)
   const getStatusText = (status) => {
     const statusTexts = {
       scheduled: 'Scheduled',
       active: 'Active',
-      completed: 'Completed', 
-      expired: 'Expired'
+      completed: 'Completed'
     };
     return statusTexts[status] || 'Scheduled';
   };
@@ -113,10 +114,6 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
             <span className="status-icon">✅</span>
             <span>Completed</span>
           </div>
-          <div className="legend-item">
-            <span className="status-icon">❌</span>
-            <span>Expired</span>
-          </div>
         </div>
       </div>
 
@@ -128,7 +125,6 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
             <option value="scheduled">Scheduled</option>
             <option value="active">Active</option>
             <option value="completed">Completed</option>
-            <option value="expired">Expired</option>
           </select>
         </div>
         
@@ -207,11 +203,11 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
                             🗑️
                           </button>
                         )}
-                        {status === 'expired' && (
+                        {status === 'completed' && (
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleDelete(schedule)}
-                            title="Delete Expired Schedule"
+                            title="Delete Completed Schedule"
                           >
                             🗑️
                           </button>

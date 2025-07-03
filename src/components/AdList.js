@@ -149,29 +149,31 @@ const AdList = ({ ads, onRefresh }) => {
     delete window.currentAdId;
   };
 
-  // 상태별 아이콘 렌더링 (텍스트 없이 아이콘만)
-  const renderStatusIcon = (status) => {
-    const icons = {
-      active: '✅',
-      inactive: '⏸️', 
-      pending: '⏳'
-    };
-    
-    return (
-      <span className="status-icon" title={getStatusText(status)}>
-        {icons[status] || icons.pending}
-      </span>
-    );
+  // 상태별 아이콘 렌더링 (실제 API 데이터 구조에 맞게 수정)
+  const renderStatusIcon = (ad) => {
+    // upload_status와 active 필드를 조합해서 상태 결정
+    if (ad.upload_status === 'COMPLETED' && ad.active === "true") {
+      return <span className="status-icon" title="Active">✅</span>;
+    } else if (ad.upload_status === 'COMPLETED' && ad.active === "false") {
+      return <span className="status-icon" title="Inactive">⏸️</span>;
+    } else if (ad.upload_status === 'PENDING') {
+      return <span className="status-icon" title="Pending Upload">⏳</span>;
+    } else {
+      return <span className="status-icon" title="Unknown">❓</span>;
+    }
   };
 
-  // 상태 텍스트 반환
-  const getStatusText = (status) => {
-    const statusTexts = {
-      active: 'Active',
-      inactive: 'Inactive',
-      pending: 'Pending'
-    };
-    return statusTexts[status] || 'Pending';
+  // 상태 텍스트 반환 (실제 API 데이터 구조에 맞게 수정)
+  const getStatusText = (ad) => {
+    if (ad.upload_status === 'COMPLETED' && ad.active === "true") {
+      return 'Active';
+    } else if (ad.upload_status === 'COMPLETED' && ad.active === "false") {
+      return 'Inactive';
+    } else if (ad.upload_status === 'PENDING') {
+      return 'Pending';
+    } else {
+      return 'Unknown';
+    }
   };
 
   return (
@@ -403,9 +405,9 @@ const AdList = ({ ads, onRefresh }) => {
             </thead>
             <tbody>
               {ads.map(ad => (
-                <tr key={ad.ad_id} className={`ad-row ${ad.status}`}>
+                <tr key={ad.ad_id} className={`ad-row ${getStatusText(ad).toLowerCase()}`}>
                   <td>
-                    {renderStatusIcon(ad.status)}
+                    {renderStatusIcon(ad)}
                   </td>
                   <td>
                     <div className="ad-info">
@@ -427,9 +429,9 @@ const AdList = ({ ads, onRefresh }) => {
                   </td>
                   <td>
                     <div className="ad-actions">
-                      {ad.video_url && (
+                      {ad.cdn_url && (
                         <a
-                          href={ad.video_url}
+                          href={ad.cdn_url}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="btn btn-secondary btn-sm"
@@ -456,13 +458,13 @@ const AdList = ({ ads, onRefresh }) => {
           <div className="stat">
             <span className="stat-label">Active:</span>
             <span className="stat-value">
-              {ads.filter(ad => ad.status === 'active').length}
+              {ads.filter(ad => ad.upload_status === 'COMPLETED' && ad.active === "true").length}
             </span>
           </div>
           <div className="stat">
             <span className="stat-label">Pending:</span>
             <span className="stat-value">
-              {ads.filter(ad => ad.status === 'pending').length}
+              {ads.filter(ad => ad.upload_status === 'PENDING').length}
             </span>
           </div>
         </div>

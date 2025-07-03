@@ -142,7 +142,7 @@ const AdScheduler = ({ ads, onScheduleCreate }) => {
             required
           >
             <option value="">Please select an ad</option>
-            {ads.filter(ad => ad.status === 'active').map(ad => (
+            {ads.filter(ad => ad.active === "true").map(ad => (
               <option key={ad.ad_id} value={ad.ad_id}>
                 {ad.title} ({ad.duration}sec) - {ad.advertiser}
               </option>

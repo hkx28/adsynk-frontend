@@ -57,12 +57,14 @@ const Settings = ({ onMediaLiveStatusUpdate }) => {
       );
 
       if (result.success) {
-        const { connected, channelId, channelName, state } = result.data;
+        // 실제 API 응답 구조에 맞게 수정
+        const responseData = result.data || result;
+        const { channelId, channelName, channelState } = responseData;
         
         setMediaLiveConfig(prev => ({
           ...prev,
           channelName: channelName || `Channel-${channelId}`,
-          channelState: state,
+          channelState: channelState,
           connectionStatus: 'connected',
           lastTested: new Date().toISOString()
         }));
@@ -79,7 +81,7 @@ const Settings = ({ onMediaLiveStatusUpdate }) => {
             connected: true,
             channelId: channelId,
             channelName: channelName,
-            channelState: state
+            channelState: channelState
           });
         }
 

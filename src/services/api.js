@@ -9,6 +9,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: false,  // CORS 문제 해결을 위해 추가
 });
 
 // 광고 관련 API
@@ -136,14 +137,30 @@ export const scheduleAPI = {
     try {
       // 1. DynamoDB에 스케줄 저장 - 백엔드 API 필드명에 맞게 변환
       const apiScheduleData = {
-        adId: scheduleData.ad_id,
+        selectedAdId: scheduleData.ad_id,  // 백엔드가 기대하는 필드명
         scheduleTime: scheduleData.schedule_time,  // camelCase로 변환
         eventName: scheduleData.event_name,
         duration: scheduleData.duration
       };
       
       console.log('Creating DynamoDB schedule...', apiScheduleData);
-      dynamodbResult = await api.post('/api/schedule', apiScheduleData);
+      
+      // CORS 문제 해결을 위해 fetch 사용
+      const response = await fetch(`${API_BASE_URL}/api/schedule`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(apiScheduleData),
+        mode: 'cors'
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP ${response.status} Error`);
+      }
+
+      dynamodbResult = { data: await response.json() };
       
       // 2. MediaLive 설정 확인
       const mediaLiveConfig = localStorage.getItem('mediaLiveConfig');

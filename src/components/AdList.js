@@ -7,19 +7,87 @@ const AdList = ({ ads, onRefresh }) => {
     title: '',
     advertiser: '',
     duration: 30,
-    category: 'general'
+    active: true  // category 제거, active 추가
   });
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [uploadStep, setUploadStep] = useState(1); // 1: 정보입력, 2: 파일업로드
+  
+  // 페이지네이션 상태 추가
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // 페이지네이션 계산
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentAds = ads.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(ads.length / itemsPerPage);
+
+  // 페이지 변경 핸들러
+  const handlePageChange = (pageNumber) => {
+    setCurrentPage(pageNumber);
+  };
+
+  // Active 상태 토글 핸들러
+  const handleToggleActive = async (adId, currentActive) => {
+    try {
+      console.log(`Toggle active for ad ${adId}: ${currentActive} -> ${currentActive === "true" ? "false" : "true"}`);
+      
+      const result = await adAPI.toggleAdStatus(adId, currentActive);
+      
+      if (result.ad_id) {
+        // 성공적으로 토글됨
+        onRefresh(); // 광고 목록 새로고침
+        
+        const newStatus = result.active === "true" ? "Active" : "Inactive";
+        alert(`Ad status updated to ${newStatus}`);
+      } else {
+        throw new Error('Invalid response from server');
+      }
+    } catch (error) {
+      console.error('Failed to toggle active status:', error);
+      alert('Failed to toggle active status: ' + error.message);
+    }
+  };
+
+  // 광고 삭제 핸들러
+  const handleDeleteAd = async (adId) => {
+    if (!window.confirm('Are you sure you want to delete this ad?\n\nThis action cannot be undone.')) {
+      return;
+    }
+    
+    try {
+      console.log(`Delete ad ${adId}`);
+      
+      const result = await adAPI.deleteAd(adId);
+      
+      if (result.ad_id) {
+        // 성공적으로 삭제됨
+        onRefresh(); // 광고 목록 새로고침
+        alert('Ad deleted successfully');
+      } else {
+        throw new Error('Invalid response from server');
+      }
+    } catch (error) {
+      console.error('Failed to delete ad:', error);
+      
+      // 활성 스케줄이 있는 경우 특별한 메시지 표시
+      if (error.response?.status === 400 && error.response?.data?.error?.includes('active schedules')) {
+        const activeSchedules = error.response.data.active_schedules || 0;
+        alert(`Cannot delete ad: ${activeSchedules} active schedule(s) are using this ad.\n\nPlease delete or complete the schedules first.`);
+      } else {
+        alert('Failed to delete ad: ' + error.message);
+      }
+    }
+  };
 
   // 업로드 폼 데이터 변경
   const handleUploadFormChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type, checked } = e.target;
     setUploadForm(prev => ({
       ...prev,
-      [name]: value
+      [name]: type === 'checkbox' ? checked : value
     }));
   };
 
@@ -58,7 +126,7 @@ const AdList = ({ ads, onRefresh }) => {
         title: uploadForm.title,
         advertiser: uploadForm.advertiser,
         duration: parseInt(uploadForm.duration),
-        category: uploadForm.category
+        active: uploadForm.active
       };
 
       setUploadProgress('Generating presigned URL...');
@@ -124,7 +192,7 @@ const AdList = ({ ads, onRefresh }) => {
           title: '',
           advertiser: '',
           duration: 30,
-          category: 'general'
+          active: true
         });
         setSelectedFile(null);
         setUploadStep(1);
@@ -293,29 +361,19 @@ const AdList = ({ ads, onRefresh }) => {
                 </div>
                 
                 <div className="form-group">
-                  <label htmlFor="category">Category</label>
-                  <input
-                    type="text"
-                    id="category"
-                    name="category"
-                    value={uploadForm.category}
-                    onChange={handleUploadFormChange}
-                    placeholder="e.g: General, Food, Technology"
-                    list="category-suggestions"
-                    required
-                  />
-                  <datalist id="category-suggestions">
-                    <option value="General" />
-                    <option value="Food" />
-                    <option value="Fashion" />
-                    <option value="Technology" />
-                    <option value="Automotive" />
-                    <option value="Healthcare" />
-                    <option value="Entertainment" />
-                    <option value="Sports" />
-                    <option value="Travel" />
-                    <option value="Finance" />
-                  </datalist>
+                  <label htmlFor="active">Active Status</label>
+                  <div className="active-toggle-form">
+                    <input
+                      type="checkbox"
+                      id="active"
+                      name="active"
+                      checked={uploadForm.active}
+                      onChange={handleUploadFormChange}
+                    />
+                    <label htmlFor="active" className="toggle-label">
+                      {uploadForm.active ? '✅ Active (will be available for scheduling)' : '⏸️ Inactive (will not be available for scheduling)'}
+                    </label>
+                  </div>
                 </div>
               </div>
 
@@ -406,13 +464,13 @@ const AdList = ({ ads, onRefresh }) => {
                 <th>Status</th>
                 <th>Ad Info</th>
                 <th>Length</th>
-                <th>Category</th>
                 <th>Created</th>
-                <th>Actions</th>
+                <th>Active</th>
+                <th>VOD</th>
               </tr>
             </thead>
             <tbody>
-              {ads.map(ad => (
+              {currentAds.map(ad => (
                 <tr key={ad.ad_id} className={`ad-row ${getStatusText(ad).toLowerCase()}`}>
                   <td>
                     {renderStatusIcon(ad)}
@@ -428,15 +486,23 @@ const AdList = ({ ads, onRefresh }) => {
                     <span className="duration">{ad.duration}sec</span>
                   </td>
                   <td>
-                    <span className="category">{ad.category || 'General'}</span>
-                  </td>
-                  <td>
                     <div className="created-date">
                       {new Date(ad.created_at).toLocaleDateString('ko-KR')}
                     </div>
                   </td>
                   <td>
-                    <div className="ad-actions">
+                    <div className="active-toggle">
+                      <button
+                        className={`btn btn-sm ${ad.active === "true" ? 'btn-success' : 'btn-secondary'}`}
+                        onClick={() => handleToggleActive(ad.ad_id, ad.active)}
+                        title={ad.active === "true" ? 'Deactivate' : 'Activate'}
+                      >
+                        {ad.active === "true" ? '✅ Active' : '⏸️ Inactive'}
+                      </button>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="vod-actions">
                       {ad.cdn_url && (
                         <a
                           href={ad.cdn_url}
@@ -445,9 +511,17 @@ const AdList = ({ ads, onRefresh }) => {
                           className="btn btn-secondary btn-sm"
                           title="View Video"
                         >
-                          🎬
+                          🎬 VOD
                         </a>
                       )}
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={() => handleDeleteAd(ad.ad_id)}
+                        title="Delete Ad"
+                        style={{ marginLeft: '0.5rem' }}
+                      >
+                        🗑️
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -487,6 +561,25 @@ const AdList = ({ ads, onRefresh }) => {
           <li>Ad length must match actual video length</li>
         </ul>
       </div>
+
+      {totalPages > 1 && (
+        <div className="pagination">
+          <div className="pagination-info">
+            Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, ads.length)} of {ads.length} ads
+          </div>
+          <div className="pagination-buttons">
+            {Array.from({ length: totalPages }, (_, i) => (
+              <button
+                key={i + 1}
+                className={`btn btn-secondary ${currentPage === i + 1 ? 'active' : ''}`}
+                onClick={() => handlePageChange(i + 1)}
+              >
+                {i + 1}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

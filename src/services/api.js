@@ -39,6 +39,31 @@ export const adAPI = {
       console.error('Error creating ad:', error);
       throw error;
     }
+  },
+
+  // 광고 활성화 상태 토글
+  toggleAdStatus: async (adId, currentActive) => {
+    try {
+      const newActive = currentActive === "true" ? "false" : "true";
+      const response = await api.put(`/api/ads/${adId}/status`, {
+        active: newActive
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error toggling ad status:', error);
+      throw error;
+    }
+  },
+
+  // 광고 삭제
+  deleteAd: async (adId) => {
+    try {
+      const response = await api.delete(`/api/ads/${adId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error deleting ad:', error);
+      throw error;
+    }
   }
 };
 

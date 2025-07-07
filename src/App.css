@@ -2273,3 +2273,36 @@
     font-size: 0.9rem;
   }
 } 
+
+/* 스케줄 상태별 스타일 */
+.schedule-status.scheduled {
+  background: linear-gradient(135deg, #6c7b7f, #8a9ba8);
+  color: white;
+}
+
+.schedule-status.active {
+  background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
+  color: white;
+  animation: pulse 2s infinite;
+}
+
+.schedule-status.completed {
+  background: linear-gradient(135deg, #51cf66, #69db7c);
+  color: white;
+}
+
+.schedule-status.processing {
+  background: linear-gradient(135deg, #ffd43b, #ffd43b);
+  color: #333;
+  animation: spin 2s linear infinite;
+}
+
+.schedule-status.failed {
+  background: linear-gradient(135deg, #ff6b6b, #ff5252);
+  color: white;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+} 

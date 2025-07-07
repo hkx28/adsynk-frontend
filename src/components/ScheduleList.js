@@ -19,17 +19,17 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
     const scheduleTime = parseISO(schedule.schedule_time);
     const now = new Date();
     
-    // 백엔드에서 명시적으로 completed로 설정된 경우
+    // 백엔드에서 명시적으로 설정된 상태 우선 처리
     if (schedule.status === 'completed') return 'completed';
+    if (schedule.status === 'processing') return 'processing';
+    if (schedule.status === 'failed') return 'failed';
     
-    // 스케줄 시간이 지났으면 성공적으로 완료된 것으로 처리
+    // 스케줄 시간이 지났으면 성공적으로 완료된 것으로 처리 (기존 로직 유지)
     if (isPast(scheduleTime)) return 'completed';
     
-    // 현재 시간이 스케줄 시간의 1분 이내인지 확인
-    const isActive = isWithinInterval(now, {
-      start: addMinutes(scheduleTime, -1),
-      end: addMinutes(scheduleTime, 1)
-    });
+    // 현재 시간이 스케줄 시간의 1분 이내인지 확인 (초단위 정밀도로 개선)
+    const timeDiff = Math.abs(now.getTime() - scheduleTime.getTime());
+    const isActive = timeDiff <= 60000; // 60초 이내
     
     if (isActive) return 'active';
     return 'scheduled';
@@ -215,7 +215,9 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
     const icons = {
       scheduled: '⏰',
       active: '🔴', 
-      completed: '✅'
+      completed: '✅',
+      processing: '⚙️',
+      failed: '❌'
     };
     
     return (
@@ -230,7 +232,9 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
     const statusTexts = {
       scheduled: 'Scheduled',
       active: 'Active',
-      completed: 'Completed'
+      completed: 'Completed',
+      processing: 'Processing',
+      failed: 'Failed'
     };
     return statusTexts[status] || 'Scheduled';
   };
@@ -260,6 +264,14 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
             <span className="status-icon">✅</span>
             <span>Completed</span>
           </div>
+          <div className="legend-item">
+            <span className="status-icon">⚙️</span>
+            <span>Processing</span>
+          </div>
+          <div className="legend-item">
+            <span className="status-icon">❌</span>
+            <span>Failed</span>
+          </div>
         </div>
       </div>
 
@@ -271,6 +283,8 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
             <option value="scheduled">Scheduled</option>
             <option value="active">Active</option>
             <option value="completed">Completed</option>
+            <option value="processing">Processing</option>
+            <option value="failed">Failed</option>
           </select>
         </div>
         

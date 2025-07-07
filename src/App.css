@@ -571,6 +571,8 @@
   font-weight: 700;
   color: #ffffff;
   margin-top: 0.25rem;
+  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
+  letter-spacing: 0.5px;
 }
 
 .ad-info .ad-title {

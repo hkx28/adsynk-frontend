@@ -80,26 +80,31 @@ const AdScheduler = ({ ads, onScheduleCreate }) => {
 
   // 빠른 시간 설정 버튼들
   const quickTimeButtons = [
-    { label: 'Custom', minutes: null },
-    { label: 'Now', minutes: 0 },
-    { label: '5min', minutes: 5 },
-    { label: '10min', minutes: 10 },
-    { label: '30min', minutes: 30 }
+    { label: 'Custom', minutes: null, seconds: null },
+    { label: 'Now', minutes: 0, seconds: 0 },
+    { label: '30sec', minutes: 0, seconds: 30 },
+    { label: '1min', minutes: 1, seconds: 0 },
+    { label: '2min', minutes: 2, seconds: 0 },
+    { label: '5min', minutes: 5, seconds: 0 },
+    { label: '10min', minutes: 10, seconds: 0 },
+    { label: '30min', minutes: 30, seconds: 0 }
   ];
 
-  const setQuickTime = (minutes) => {
-    if (minutes === null) {
+  const setQuickTime = (minutes, seconds = 0) => {
+    if (minutes === null && seconds === null) {
       // Custom - 현재 시간으로 설정하여 사용자가 수정할 수 있도록
       const now = new Date();
       setFormData(prev => ({
         ...prev,
-        schedule_time: format(now, "yyyy-MM-dd'T'HH:mm")
+        schedule_time: format(now, "yyyy-MM-dd'T'HH:mm:ss")
       }));
     } else {
-      const futureTime = addMinutes(new Date(), minutes);
+      const now = new Date();
+      const futureTime = addMinutes(now, minutes);
+      futureTime.setSeconds(futureTime.getSeconds() + seconds);
       setFormData(prev => ({
         ...prev,
-        schedule_time: format(futureTime, "yyyy-MM-dd'T'HH:mm")
+        schedule_time: format(futureTime, "yyyy-MM-dd'T'HH:mm:ss")
       }));
     }
   };
@@ -154,20 +159,21 @@ const AdScheduler = ({ ads, onScheduleCreate }) => {
           <label htmlFor="schedule_time">Schedule Time</label>
           <input
             type="datetime-local"
+            step="1"
             id="schedule_time"
             name="schedule_time"
             value={formData.schedule_time}
             onChange={handleChange}
-            min={format(new Date(), "yyyy-MM-dd'T'HH:mm")}
+            min={format(new Date(), "yyyy-MM-dd'T'HH:mm:ss")}
             required
           />
           <div className="quick-time-buttons">
-            {quickTimeButtons.map(({ label, minutes }, index) => (
+            {quickTimeButtons.map(({ label, minutes, seconds }, index) => (
               <button
                 key={index}
                 type="button"
-                className={`btn ${minutes === null ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setQuickTime(minutes)}
+                className={`btn ${minutes === null && seconds === null ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setQuickTime(minutes, seconds)}
                 style={{ margin: '0.25rem' }}
               >
                 {label}
@@ -219,7 +225,7 @@ const AdScheduler = ({ ads, onScheduleCreate }) => {
       <div className="scheduler-info">
         <h3>📋 Scheduling Guide</h3>
         <ul style={{ textAlign: 'left', color: 'rgba(255, 255, 255, 0.8)' }}>
-          <li>Schedules run precisely on a minute-by-minute basis</li>
+          <li>Schedules run with second-level precision (±5 seconds tolerance)</li>
           <li>MediaLive SCTE-35 schedule must also be created together</li>
           <li>Ad length must match MediaLive settings</li>
           <li>Cannot create schedules for past times</li>

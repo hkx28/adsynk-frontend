@@ -197,7 +197,7 @@ const ScheduleList = ({ schedules, ads, onScheduleDelete, onRefresh }) => {
   // 스케줄 삭제 확인 (Phase 4: MediaLive 통합)
   const handleDelete = (schedule) => {
     const adInfo = getAdInfo(schedule.ad_id);
-    const confirmMessage = `"${adInfo.title}" 스케줄을 삭제하시겠습니까?\n시간: ${format(parseISO(schedule.schedule_time), 'yyyy-MM-dd HH:mm')}\n\n⚠️ MediaLive SCTE-35 스케줄도 함께 삭제됩니다.`;
+    const confirmMessage = `"${adInfo.title}" 스케줄을 삭제하시겠습니까?\n시간: ${format(parseISO(schedule.schedule_time), 'yyyy-MM-dd HH:mm:ss')}\n\n⚠️ MediaLive SCTE-35 스케줄도 함께 삭제됩니다.`;
     
     if (window.confirm(confirmMessage)) {
       // Phase 4: 스케줄 ID와 함께 스케줄 데이터도 전달

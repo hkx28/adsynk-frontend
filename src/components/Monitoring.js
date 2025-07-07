@@ -768,7 +768,7 @@ const Monitoring = () => {
                     </td>
                     <td>
                       <div className="last-impression">
-                        {format(parseISO(ad.lastImpression), 'MM/dd HH:mm')}
+                        {format(parseISO(ad.lastImpression), 'MM/dd HH:mm:ss')}
                       </div>
                     </td>
                   </tr>

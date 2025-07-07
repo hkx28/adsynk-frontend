@@ -10,21 +10,15 @@ const Monitoring = () => {
     totalAdvertisers: 0,
     successRate: 0,
     avgDuration: 0,
+    actualExposedAds: 0, // 실제 노출 광고 수 (FILLED_AVAIL 기준)
+    dailyFilledAvails: 0, // 당일 FILLED_AVAIL 횟수
     topPerformingAds: [],
     advertiserStats: [],
     dailyStats: [],
     monthlyStats: []
   });
 
-  // 실시간 메트릭 상태
-  const [realtimeMetrics, setRealtimeMetrics] = useState({
-    actualSuccessRate: 0,
-    scheduleSuccessRate: 0,
-    avgTranscodeTime: 0,
-    avgFillRate: 0,
-    totalFilledAvails: 0,
-    lastUpdated: null
-  });
+
 
   // 필터 및 설정 상태
   const [dateRange, setDateRange] = useState({
@@ -46,24 +40,7 @@ const Monitoring = () => {
     data: null 
   });
 
-  // 실시간 메트릭 로드
-  const loadRealtimeMetrics = async () => {
-    try {
-      const response = await analyticsAPI.getRealtimeMetrics({ hours: 1 });
-      if (response.success) {
-        setRealtimeMetrics({
-          actualSuccessRate: response.metrics.actualSuccessRate || 0,
-          scheduleSuccessRate: response.metrics.scheduleSuccessRate || 0,
-          avgTranscodeTime: response.metrics.avgTranscodeTime || 0,
-          avgFillRate: response.metrics.avgFillRate || 0,
-          totalFilledAvails: response.metrics.totalFilledAvails || 0,
-          lastUpdated: new Date().toISOString()
-        });
-      }
-    } catch (error) {
-      console.error('실시간 메트릭 로드 실패:', error);
-    }
-  };
+
 
   // 광고 성과 데이터 로드
   const loadAdPerformanceData = async () => {
@@ -315,12 +292,30 @@ const Monitoring = () => {
         ? new Set(adsData.map(ad => ad.advertiser)).size
         : 1;
 
+      // 실제 노출 광고 수 계산 (현재는 성공한 스케줄 수로 임시 설정)
+      // 향후 MediaTailor CloudWatch Logs의 FILLED_AVAIL 이벤트로 대체 예정
+      const actualExposedAds = successfulImpressions;
+
+      // 성공률 계산: 실제 노출 광고수 / 총 광고 노출수 * 100
+      const actualSuccessRate = totalImpressions > 0 ? (actualExposedAds / totalImpressions * 100).toFixed(1) : 0;
+
+      // 당일 FILLED_AVAIL 횟수 계산 (현재는 오늘 날짜의 성공한 스케줄로 임시 설정)
+      // 향후 MediaTailor CloudWatch Logs의 당일 FILLED_AVAIL 이벤트로 대체 예정
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD 형식
+      const todaySuccessfulSchedules = filteredSchedulesForStats.filter(schedule => {
+        const scheduleDate = schedule.schedule_time.split('T')[0];
+        return scheduleDate === today && schedule.status === 'completed';
+      });
+      const dailyFilledAvails = todaySuccessfulSchedules.length;
+
       setAdPerformanceData({
         totalImpressions,
         totalAds: adsData.length,
         totalAdvertisers: uniqueAdvertisers,
-        successRate,
+        successRate: actualSuccessRate,
         avgDuration,
+        actualExposedAds,
+        dailyFilledAvails,
         topPerformingAds,
         advertiserStats,
         dailyStats,
@@ -336,10 +331,7 @@ const Monitoring = () => {
   const refreshData = async () => {
     setLoading(true);
     try {
-      await Promise.all([
-        loadAdPerformanceData(),
-        loadRealtimeMetrics()
-      ]);
+      await loadAdPerformanceData();
       setLastRefresh(new Date());
     } catch (error) {
       console.error('Failed to refresh data:', error);
@@ -663,88 +655,9 @@ const Monitoring = () => {
           </div>
         </div>
 
-      {/* 실시간 메트릭 대시보드 */}
-      <div className="realtime-metrics-section">
-        <div className="card">
-          <div className="card-header">
-            <h3>🔴 실시간 MediaTailor 모니터링</h3>
-            <div className="realtime-status">
-              {realtimeMetrics.lastUpdated && (
-                <span className="last-updated">
-                  Last Updated: {format(new Date(realtimeMetrics.lastUpdated), 'HH:mm:ss')}
-                </span>
-              )}
-            </div>
-          </div>
-          
-          <div className="realtime-metrics-grid">
-            {/* 실제 성공률 vs 스케줄 성공률 비교 */}
-            <div className="metric-card realtime-card">
-              <div className="metric-icon">🎯</div>
-              <div className="metric-content">
-                <div className="metric-value-comparison">
-                  <div className="actual-rate">
-                    <span className="rate-value">{realtimeMetrics.actualSuccessRate}%</span>
-                    <span className="rate-label">실제 성공률</span>
-                  </div>
-                  <div className="vs-divider">vs</div>
-                  <div className="schedule-rate">
-                    <span className="rate-value">{realtimeMetrics.scheduleSuccessRate}%</span>
-                    <span className="rate-label">스케줄 성공률</span>
-                  </div>
-                </div>
-                <div className="metric-detail">
-                  {realtimeMetrics.actualSuccessRate > 0 && realtimeMetrics.scheduleSuccessRate > 0 && (
-                    <div className="accuracy-indicator">
-                      정확도: {Math.abs(realtimeMetrics.actualSuccessRate - realtimeMetrics.scheduleSuccessRate).toFixed(1)}% 차이
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
 
-            {/* 평균 트랜스코딩 시간 */}
-            <div className="metric-card realtime-card">
-              <div className="metric-icon">⚡</div>
-              <div className="metric-content">
-                <div className="metric-value">{realtimeMetrics.avgTranscodeTime}초</div>
-                <div className="metric-label">평균 트랜스코딩 시간</div>
-                <div className="metric-detail">
-                  {realtimeMetrics.avgTranscodeTime > 30 ? '⚠️ 느림' : '✅ 정상'}
-                </div>
-              </div>
-            </div>
 
-            {/* Fill Rate */}
-            <div className="metric-card realtime-card">
-              <div className="metric-icon">📊</div>
-              <div className="metric-content">
-                <div className="metric-value">{(realtimeMetrics.avgFillRate * 100).toFixed(1)}%</div>
-                <div className="metric-label">평균 Fill Rate</div>
-                <div className="metric-detail">
-                  {realtimeMetrics.totalFilledAvails}개 삽입 성공
-                </div>
-              </div>
-            </div>
-
-            {/* 실시간 상태 표시 */}
-            <div className="metric-card realtime-card">
-              <div className="metric-icon">📡</div>
-              <div className="metric-content">
-                <div className="metric-value">
-                  {realtimeMetrics.actualSuccessRate > 0 ? '🟢 LIVE' : '🔴 NO DATA'}
-                </div>
-                <div className="metric-label">MediaTailor 상태</div>
-                <div className="metric-detail">
-                  최근 1시간 기준
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 주요 지표 카드 (순서 변경: Total → Active → Avg Daily → Avg Duration → Success) */}
+      {/* 주요 지표 카드 (순서 변경: Total → Actual → Success → Avg Daily → Avg Duration → Active) */}
       <div className="metrics-grid">
         {/* 1. Total Ad Impressions */}
         <div className="metric-card">
@@ -758,35 +671,43 @@ const Monitoring = () => {
           </div>
         </div>
 
-        {/* 2. Active Advertisers */}
+        {/* 2. 실제 노출 광고 (FILLED_AVAIL 기준) */}
         <div className="metric-card">
-          <div className="metric-icon">🏢</div>
+          <div className="metric-icon">📡</div>
           <div className="metric-content">
-            <div className="metric-value">{adPerformanceData.totalAdvertisers}</div>
-            <div className="metric-label">Active Advertisers</div>
+            <div className="metric-value">{adPerformanceData.actualExposedAds.toLocaleString()}</div>
+            <div className="metric-label">Actual Exposed Ads</div>
             <div className="metric-detail">
-              {adPerformanceData.totalAds} total ads
+              MediaTailor FILLED_AVAIL
             </div>
           </div>
         </div>
 
-        {/* 3. Avg Daily Impressions */}
+        {/* 3. Success Rate (총 광고 노출수 vs 실제 노출 광고수) */}
+        <div className="metric-card">
+          <div className="metric-icon">🎯</div>
+          <div className="metric-content">
+            <div className="metric-value">{adPerformanceData.successRate}%</div>
+            <div className="metric-label">Success Rate</div>
+            <div className="metric-detail">
+              actual vs total impressions
+            </div>
+          </div>
+        </div>
+
+        {/* 4. Avg Daily Impressions (당일 FILLED_AVAIL 기준) */}
         <div className="metric-card">
           <div className="metric-icon">📈</div>
           <div className="metric-content">
-            <div className="metric-value">
-              {adPerformanceData.dailyStats.length > 0 
-                ? Math.round(adPerformanceData.totalImpressions / adPerformanceData.dailyStats.length)
-                : 0}
-            </div>
-            <div className="metric-label">Avg Daily Impressions</div>
+            <div className="metric-value">{adPerformanceData.dailyFilledAvails}</div>
+            <div className="metric-label">Today's Filled Avails</div>
             <div className="metric-detail">
-              per day average
+              actual exposures today
             </div>
           </div>
         </div>
 
-        {/* 4. Avg Ad Duration */}
+        {/* 5. Avg Ad Duration */}
         <div className="metric-card">
           <div className="metric-icon">⏱️</div>
           <div className="metric-content">
@@ -798,14 +719,14 @@ const Monitoring = () => {
           </div>
         </div>
 
-        {/* 5. Success Rate */}
+        {/* 6. Active Advertisers */}
         <div className="metric-card">
-          <div className="metric-icon">🎯</div>
+          <div className="metric-icon">🏢</div>
           <div className="metric-content">
-            <div className="metric-value">{adPerformanceData.successRate}%</div>
-            <div className="metric-label">Success Rate</div>
+            <div className="metric-value">{adPerformanceData.totalAdvertisers}</div>
+            <div className="metric-label">Active Advertisers</div>
             <div className="metric-detail">
-              successful insertions
+              {adPerformanceData.totalAds} total ads
             </div>
           </div>
         </div>

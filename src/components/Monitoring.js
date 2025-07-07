@@ -16,6 +16,16 @@ const Monitoring = () => {
     monthlyStats: []
   });
 
+  // 실시간 메트릭 상태
+  const [realtimeMetrics, setRealtimeMetrics] = useState({
+    actualSuccessRate: 0,
+    scheduleSuccessRate: 0,
+    avgTranscodeTime: 0,
+    avgFillRate: 0,
+    totalFilledAvails: 0,
+    lastUpdated: null
+  });
+
   // 필터 및 설정 상태
   const [dateRange, setDateRange] = useState({
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
@@ -35,6 +45,25 @@ const Monitoring = () => {
     y: 0, 
     data: null 
   });
+
+  // 실시간 메트릭 로드
+  const loadRealtimeMetrics = async () => {
+    try {
+      const response = await analyticsAPI.getRealtimeMetrics({ hours: 1 });
+      if (response.success) {
+        setRealtimeMetrics({
+          actualSuccessRate: response.metrics.actualSuccessRate || 0,
+          scheduleSuccessRate: response.metrics.scheduleSuccessRate || 0,
+          avgTranscodeTime: response.metrics.avgTranscodeTime || 0,
+          avgFillRate: response.metrics.avgFillRate || 0,
+          totalFilledAvails: response.metrics.totalFilledAvails || 0,
+          lastUpdated: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      console.error('실시간 메트릭 로드 실패:', error);
+    }
+  };
 
   // 광고 성과 데이터 로드
   const loadAdPerformanceData = async () => {
@@ -307,7 +336,10 @@ const Monitoring = () => {
   const refreshData = async () => {
     setLoading(true);
     try {
-      await loadAdPerformanceData();
+      await Promise.all([
+        loadAdPerformanceData(),
+        loadRealtimeMetrics()
+      ]);
       setLastRefresh(new Date());
     } catch (error) {
       console.error('Failed to refresh data:', error);
@@ -630,6 +662,87 @@ const Monitoring = () => {
             </div>
           </div>
         </div>
+
+      {/* 실시간 메트릭 대시보드 */}
+      <div className="realtime-metrics-section">
+        <div className="card">
+          <div className="card-header">
+            <h3>🔴 실시간 MediaTailor 모니터링</h3>
+            <div className="realtime-status">
+              {realtimeMetrics.lastUpdated && (
+                <span className="last-updated">
+                  Last Updated: {format(new Date(realtimeMetrics.lastUpdated), 'HH:mm:ss')}
+                </span>
+              )}
+            </div>
+          </div>
+          
+          <div className="realtime-metrics-grid">
+            {/* 실제 성공률 vs 스케줄 성공률 비교 */}
+            <div className="metric-card realtime-card">
+              <div className="metric-icon">🎯</div>
+              <div className="metric-content">
+                <div className="metric-value-comparison">
+                  <div className="actual-rate">
+                    <span className="rate-value">{realtimeMetrics.actualSuccessRate}%</span>
+                    <span className="rate-label">실제 성공률</span>
+                  </div>
+                  <div className="vs-divider">vs</div>
+                  <div className="schedule-rate">
+                    <span className="rate-value">{realtimeMetrics.scheduleSuccessRate}%</span>
+                    <span className="rate-label">스케줄 성공률</span>
+                  </div>
+                </div>
+                <div className="metric-detail">
+                  {realtimeMetrics.actualSuccessRate > 0 && realtimeMetrics.scheduleSuccessRate > 0 && (
+                    <div className="accuracy-indicator">
+                      정확도: {Math.abs(realtimeMetrics.actualSuccessRate - realtimeMetrics.scheduleSuccessRate).toFixed(1)}% 차이
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 평균 트랜스코딩 시간 */}
+            <div className="metric-card realtime-card">
+              <div className="metric-icon">⚡</div>
+              <div className="metric-content">
+                <div className="metric-value">{realtimeMetrics.avgTranscodeTime}초</div>
+                <div className="metric-label">평균 트랜스코딩 시간</div>
+                <div className="metric-detail">
+                  {realtimeMetrics.avgTranscodeTime > 30 ? '⚠️ 느림' : '✅ 정상'}
+                </div>
+              </div>
+            </div>
+
+            {/* Fill Rate */}
+            <div className="metric-card realtime-card">
+              <div className="metric-icon">📊</div>
+              <div className="metric-content">
+                <div className="metric-value">{(realtimeMetrics.avgFillRate * 100).toFixed(1)}%</div>
+                <div className="metric-label">평균 Fill Rate</div>
+                <div className="metric-detail">
+                  {realtimeMetrics.totalFilledAvails}개 삽입 성공
+                </div>
+              </div>
+            </div>
+
+            {/* 실시간 상태 표시 */}
+            <div className="metric-card realtime-card">
+              <div className="metric-icon">📡</div>
+              <div className="metric-content">
+                <div className="metric-value">
+                  {realtimeMetrics.actualSuccessRate > 0 ? '🟢 LIVE' : '🔴 NO DATA'}
+                </div>
+                <div className="metric-label">MediaTailor 상태</div>
+                <div className="metric-detail">
+                  최근 1시간 기준
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* 주요 지표 카드 (순서 변경: Total → Active → Avg Daily → Avg Duration → Success) */}
       <div className="metrics-grid">

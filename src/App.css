@@ -2305,4 +2305,179 @@
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+/* 실시간 모니터링 대시보드 스타일 */
+.realtime-metrics-section {
+  margin-bottom: 2rem;
+}
+
+.realtime-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.realtime-card {
+  background: linear-gradient(135deg, 
+    rgba(0, 122, 255, 0.1) 0%, 
+    rgba(175, 82, 222, 0.05) 100%
+  );
+  border: 1px solid rgba(0, 122, 255, 0.2);
+  animation: realtimePulse 3s ease-in-out infinite;
+}
+
+.realtime-card:hover {
+  border-color: rgba(0, 122, 255, 0.4);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0, 122, 255, 0.2);
+}
+
+@keyframes realtimePulse {
+  0%, 100% { 
+    border-color: rgba(0, 122, 255, 0.2);
+    box-shadow: 0 0 20px rgba(0, 122, 255, 0.1);
+  }
+  50% { 
+    border-color: rgba(0, 122, 255, 0.4);
+    box-shadow: 0 0 30px rgba(0, 122, 255, 0.2);
+  }
+}
+
+.metric-value-comparison {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.actual-rate, .schedule-rate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.rate-value {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 0.25rem;
+}
+
+.actual-rate .rate-value {
+  color: #32D74B;
+  text-shadow: 0 0 10px rgba(50, 215, 75, 0.3);
+}
+
+.schedule-rate .rate-value {
+  color: #007AFF;
+  text-shadow: 0 0 10px rgba(0, 122, 255, 0.3);
+}
+
+.rate-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.vs-divider {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 0 0.5rem;
+}
+
+.accuracy-indicator {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  text-align: center;
+}
+
+.realtime-status {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.last-updated {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.25rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* 실시간 상태 표시 */
+.metric-card .metric-value:contains("🟢 LIVE") {
+  color: #32D74B;
+  animation: liveBlink 2s ease-in-out infinite;
+}
+
+.metric-card .metric-value:contains("🔴 NO DATA") {
+  color: #FF3B30;
+}
+
+@keyframes liveBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* 반응형 디자인 */
+@media (max-width: 768px) {
+  .realtime-metrics-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  
+  .metric-value-comparison {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  
+  .vs-divider {
+    transform: rotate(90deg);
+    padding: 0.5rem 0;
+  }
+  
+  .rate-value {
+    font-size: 1.75rem;
+  }
+  
+  .realtime-status {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .realtime-metrics-section {
+    margin-bottom: 1.5rem;
+  }
+  
+  .realtime-card {
+    padding: 1.5rem;
+  }
+  
+  .rate-value {
+    font-size: 1.5rem;
+  }
+  
+  .rate-label {
+    font-size: 0.75rem;
+  }
+  
+  .accuracy-indicator {
+    font-size: 0.8rem;
+    padding: 0.2rem 0.6rem;
+  }
 } 

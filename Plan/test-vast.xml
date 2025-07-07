@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<VAST version="3.0">
+  <Ad id="mid-roll-1">
+    <InLine>
+      <AdSystem>TestAdServer</AdSystem>
+      <AdTitle>Sample Ad</AdTitle>
+      <Impression><![CDATA[https://example.com/impression]]></Impression>
+      <Creatives>
+        <Creative>
+          <Linear>
+            <Duration>00:00:30</Duration>
+            <MediaFiles>
+              <MediaFile delivery="progressive" type="video/mp4" width="1920" height="1080">
+                <![CDATA[https://mzcmst-ad-server-s3-joseph.s3.ap-northeast-2.amazonaws.com/ad-media/ad_sample_30sec.mp4]]>
+              </MediaFile>
+            </MediaFiles>
+          </Linear>
+        </Creative>
+      </Creatives>
+    </InLine>
+  </Ad>
+</VAST>

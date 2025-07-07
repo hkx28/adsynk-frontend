@@ -1,0 +1,61 @@
+<vmap:VMAP xmlns:vmap="http://www.iab.net/videosuite/vmap" version="1.0">
+<vmap:AdBreak breakType="linear" timeOffset="start">
+    <vmap:AdSource>
+        <vmap:VASTAdData>
+            <VAST version="3.0">
+                <Ad sequence="1">
+                    <InLine>
+                        <AdSystem>2.0</AdSystem>
+                        <AdTitle>ad-1</AdTitle>
+                        <Impression/>
+                        <Creatives>
+                            <Creative>
+                                <Linear>
+                                    <Duration>00:00:30</Duration>
+                                    <MediaFiles>
+                                        <MediaFile delivery="progressive" type="video/mp4" width="1920" height="1080">
+                                            <![CDATA[https://mzcmst-web.s3.ap-northeast-2.amazonaws.com/AdServer/contents/Gazi_intro_30sec.mp4]]>
+                                        </MediaFile>
+                                    </MediaFiles>
+                                </Linear>
+                            </Creative>
+                        </Creatives>
+                    </InLine>
+                </Ad>
+            </VAST>
+        </vmap:VASTAdData>
+    </vmap:AdSource>
+</vmap:AdBreak>
+    <vmap:AdBreak breakType="linear" timeOffset="end">
+    <!--<vmap:AdBreak breakType="linear" timeOffset="00:01:00">-->
+        <vmap:AdSource id="postroll-ad-1" allowMultipleAds="false" followRedirects="true">
+        <!-- HLS 또는 DASH와 같은 HTTP 기반의 스트리밍 프로토콜을 사용하는 경우, 비디오 플레이어는 매니페스트 파일에서 라이브 스트림의 종료를 알 수 있기 때문에
+        이 경우, MediaTailor은 VMAP 문서에서 timeOffset="end" 속성을 가진 <vmap:AdBreak> 태그를 찾아서 포스트롤 광고를 재생할 수 있습니다.
+        해당 부분이 작성 되어야 포스트롤 적용이 가능합니다. -->
+            <vmap:VASTAdData>
+                <VAST version="3.0">
+                    <Ad sequence="1">
+                        <InLine>
+                            <AdSystem>2.0</AdSystem>
+                            <AdTitle>ad-2</AdTitle>
+                            <!--Impression 광고의 노출횟수를 측정하고 보고하는 데 사용되는 URL-->
+                            <Impression><![CDATA[https://example.com/impression]]></Impression>
+                            <Creatives>
+                                <Creative>
+                                    <Linear>
+                                        <Duration>00:00:30</Duration>
+                                        <MediaFiles>
+                                            <MediaFile delivery="progressive" type="video/mp4" width="1920" height="1080">
+                                                <![CDATA[https://mzcmst-web.s3.ap-northeast-2.amazonaws.com/AdServer/contents/Ochoice_Spot_30sec.mp4]]>
+                                            </MediaFile>
+                                        </MediaFiles>
+                                    </Linear>
+                                </Creative>
+                            </Creatives>
+                        </InLine>
+                    </Ad>
+                </VAST>
+            </vmap:VASTAdData>
+        </vmap:AdSource>
+    </vmap:AdBreak>
+</vmap:VMAP>

@@ -1,0 +1,2434 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Dynamic Ad Management System for MediaTailor Live Streaming'
+
+Parameters:
+  MediaPackageEndpointUrl:
+    Type: String
+    Description: MediaPackage endpoint URL for live stream
+    Default: "https://test.mediapackage.us-east-1.amazonaws.com/out/v1/test/index.m3u8"
+  
+  StreamName:
+    Type: String
+    Description: Stream identifier
+    Default: "live-stream"
+  
+  Environment:
+    Type: String
+    Description: Environment name
+    Default: "demo"
+    AllowedValues: ["dev", "staging", "demo", "prod"]
+  
+  AdContentBucketName:
+    Type: String
+    Description: S3 bucket for ad content (leave empty for auto-generation)
+    Default: ""
+
+  Owner:
+    Type: String
+    Description: Owner tag for all resources
+    Default: "josephkim"
+
+Conditions:
+  CreateBucketName: !Equals [!Ref AdContentBucketName, ""]
+
+Resources:
+  # ============================================
+  # S3 Bucket for Ad Content (WITHOUT notification config)
+  # ============================================
+  AdContentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - CreateBucketName
+        - !Sub "${AWS::StackName}-ad-content-${AWS::AccountId}"
+        - !Ref AdContentBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: 
+              - "*"
+            AllowedMethods: 
+              - GET
+              - PUT
+              - POST
+              - DELETE
+              - HEAD
+            AllowedOrigins: 
+              - "*"
+            ExposedHeaders:
+              - "ETag"
+              - "x-amz-meta-custom-header"
+            MaxAge: 3000
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "AdContentStorage"
+
+  # ============================================
+  # S3 Bucket Policy - Managed manually (existing policy in place)
+  # ============================================
+
+  # ============================================
+  # DynamoDB Tables (Fixed GSI issues)
+  # ============================================
+  AdInventoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-AdInventory"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ad_id
+          AttributeType: S
+        - AttributeName: advertiser
+          AttributeType: S
+        - AttributeName: campaign_id
+          AttributeType: S
+        - AttributeName: active
+          AttributeType: S
+        - AttributeName: duration
+          AttributeType: N
+      KeySchema:
+        - AttributeName: ad_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: advertiser-campaign-index
+          KeySchema:
+            - AttributeName: advertiser
+              KeyType: HASH
+            - AttributeName: campaign_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: active-duration-index
+          KeySchema:
+            - AttributeName: active
+              KeyType: HASH
+            - AttributeName: duration
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "AdInventoryData"
+
+  AdPerformanceTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-AdPerformance"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: event_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+        - AttributeName: ad_id
+          AttributeType: S
+        - AttributeName: event_type
+          AttributeType: S
+      KeySchema:
+        - AttributeName: event_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: ad-id-timestamp-index
+          KeySchema:
+            - AttributeName: ad_id
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: event-type-timestamp-index
+          KeySchema:
+            - AttributeName: event_type
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "AdPerformanceData"
+
+  TargetingRulesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-TargetingRules"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: rule_id
+          AttributeType: S
+        - AttributeName: priority
+          AttributeType: N
+        - AttributeName: active
+          AttributeType: S
+      KeySchema:
+        - AttributeName: rule_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: active-priority-index
+          KeySchema:
+            - AttributeName: active
+              KeyType: HASH
+            - AttributeName: priority
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "TargetingRulesData"
+
+  AdScheduleTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-AdSchedule"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: schedule_id
+          AttributeType: S
+        - AttributeName: schedule_time
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: schedule_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: time-status-index
+          KeySchema:
+            - AttributeName: schedule_time
+              KeyType: HASH
+            - AttributeName: status
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-time-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: schedule_time
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "AdScheduleData"
+
+  # ============================================
+  # IAM Roles
+  # ============================================
+  AdServerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-AdServerLambdaRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: DynamoDBFullAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:*
+                Resource:
+                  - !GetAtt AdInventoryTable.Arn
+                  - !Sub "${AdInventoryTable.Arn}/index/*"
+                  - !GetAtt AdPerformanceTable.Arn
+                  - !Sub "${AdPerformanceTable.Arn}/index/*"
+                  - !GetAtt TargetingRulesTable.Arn
+                  - !Sub "${TargetingRulesTable.Arn}/index/*"
+                  - !GetAtt AdScheduleTable.Arn
+                  - !Sub "${AdScheduleTable.Arn}/index/*"
+        - PolicyName: S3FullAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - !Sub "${AdContentBucket.Arn}"
+                  - !Sub "${AdContentBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListAllMyBuckets
+                Resource: "*"
+        - PolicyName: CloudWatchLogsFullAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: 
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+        - PolicyName: LambdaInvokeFunction
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+        - PolicyName: MediaLiveFullAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - medialive:DescribeChannel
+                  - medialive:ListChannels
+                  - medialive:CreateScheduleAction
+                  - medialive:DeleteScheduleAction
+                  - medialive:DescribeSchedule
+                  - medialive:BatchUpdateSchedule
+                  - medialive:BatchDeleteScheduleAction
+                Resource: "*"
+
+  # Custom Resource Lambda Role for S3 Notification
+  S3NotificationLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3NotificationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketNotification
+                  - s3:PutBucketNotification
+                Resource: !GetAtt AdContentBucket.Arn
+
+  # ============================================
+  # Lambda Functions
+  # ============================================
+  MediaLiveIntegration:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-MediaLiveIntegration"
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt AdServerLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "MediaLiveIntegrationFunction"
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import logging
+          from botocore.exceptions import ClientError, NoCredentialsError
+
+          # 로깅 설정
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              try:
+                  headers = {
+                      'Content-Type': 'application/json',
+                      'Access-Control-Allow-Origin': '*',
+                      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+                  }
+                  
+                  if event.get('httpMethod') == 'OPTIONS':
+                      return {
+                          'statusCode': 200,
+                          'headers': headers,
+                          'body': json.dumps({'message': 'CORS preflight successful'})
+                      }
+                  
+                  http_method = event.get('httpMethod')
+                  path = event.get('path', '')
+                  path_parameters = event.get('pathParameters') or {}
+                  body = event.get('body')
+                  
+                  logger.info(f"Processing {http_method} request for path: {path}")
+                  
+                  try:
+                      medialive_client = boto3.client('medialive', region_name='ap-northeast-2')
+                  except Exception as e:
+                      return create_error_response(500, f'Failed to create MediaLive client: {str(e)}', headers)
+                  
+                  # 핵심 기능: SCTE-35 스케줄 생성
+                  if http_method == 'POST' and '/channel/' in path and path.endswith('/schedule'):
+                      channel_id = path_parameters.get('channelId')
+                      return create_scte35_schedule(medialive_client, channel_id, body, headers)
+                  
+                  # 간단한 연결 테스트
+                  elif http_method == 'GET' and '/channel/' in path and path.endswith('/test'):
+                      channel_id = path_parameters.get('channelId')
+                      return test_channel_connection(medialive_client, channel_id, headers)
+                  
+                  return create_error_response(404, 'Not Found', headers)
+                  
+              except Exception as e:
+                  logger.error(f"Unexpected error: {str(e)}")
+                  return create_error_response(500, f'Internal server error: {str(e)}', headers)
+
+          def test_channel_connection(medialive_client, channel_id, headers):
+              """간단한 채널 연결 테스트"""
+              if not channel_id:
+                  return create_error_response(400, 'Channel ID is required', headers)
+              
+              try:
+                  response = medialive_client.describe_channel(ChannelId=channel_id)
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'connected': True,
+                          'channelId': channel_id,
+                          'channelName': response.get('Name', 'UNKNOWN'),
+                          'state': response.get('State', 'UNKNOWN'),
+                          'message': 'Successfully connected to MediaLive channel'
+                      })
+                  }
+                  
+              except ClientError as e:
+                  error_code = e.response['Error']['Code']
+                  if error_code == 'NotFoundException':
+                      return create_error_response(404, f'Channel {channel_id} not found', headers)
+                  else:
+                      return create_error_response(500, f'AWS Error: {error_code}', headers)
+              except Exception as e:
+                  return create_error_response(500, f'Connection test failed: {str(e)}', headers)
+
+          def create_scte35_schedule(medialive_client, channel_id, body, headers):
+              """SCTE-35 스케줄 생성 - 핵심 기능"""
+              if not channel_id:
+                  return create_error_response(400, 'Channel ID is required', headers)
+              
+              if not body:
+                  return create_error_response(400, 'Request body is required', headers)
+              
+              try:
+                  schedule_data = json.loads(body)
+                  
+                  # 필수 파라미터 검증
+                  action_name = schedule_data.get('actionName')
+                  schedule_time = schedule_data.get('scheduleTime')  # ISO 8601 format
+                  duration = schedule_data.get('duration', 30)  # seconds
+                  splice_event_id = schedule_data.get('spliceEventId', 1)
+                  
+                  if not action_name:
+                      return create_error_response(400, 'actionName is required', headers)
+                  
+                  if not schedule_time:
+                      return create_error_response(400, 'scheduleTime is required (ISO 8601 format)', headers)
+                  
+                  # batch-update-schedule API 호출
+                  schedule_action = {
+                      'ActionName': action_name,
+                      'ScheduleActionStartSettings': {
+                          'FixedModeScheduleActionStartSettings': {
+                              'Time': schedule_time
+                          }
+                      },
+                      'ScheduleActionSettings': {
+                          'Scte35SpliceInsertSettings': {
+                              'SpliceEventId': splice_event_id,
+                              'Duration': duration * 90000  # Convert to 90kHz ticks
+                          }
+                      }
+                  }
+                  
+                  response = medialive_client.batch_update_schedule(
+                      ChannelId=channel_id,
+                      Creates={
+                          'ScheduleActions': [schedule_action]
+                      }
+                  )
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'success': True,
+                          'actionName': action_name,
+                          'channelId': channel_id,
+                          'scheduleTime': schedule_time,
+                          'duration': duration,
+                          'spliceEventId': splice_event_id,
+                          'message': 'SCTE-35 schedule created successfully',
+                          'response': response.get('Creates', {})
+                      }, default=str)
+                  }
+                  
+              except json.JSONDecodeError:
+                  return create_error_response(400, 'Invalid JSON in request body', headers)
+              except ClientError as e:
+                  error_code = e.response['Error']['Code']
+                  error_message = e.response['Error'].get('Message', 'Unknown AWS error')
+                  
+                  if error_code == 'NotFoundException':
+                      return create_error_response(404, f'Channel {channel_id} not found', headers)
+                  elif error_code == 'ValidationException':
+                      return create_error_response(400, f'Invalid schedule parameters: {error_message}', headers)
+                  else:
+                      return create_error_response(500, f'AWS Error ({error_code}): {error_message}', headers)
+              except Exception as e:
+                  return create_error_response(500, f'Failed to create SCTE-35 schedule: {str(e)}', headers)
+
+          def create_error_response(status_code, message, headers):
+              return {
+                  'statusCode': status_code,
+                  'headers': headers,
+                  'body': json.dumps({
+                      'error': True,
+                      'message': message,
+                      'statusCode': status_code
+                  })
+              }
+
+
+
+  DynamicAdServer:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-DynamicAdServer"
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt AdServerLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          AD_INVENTORY_TABLE: !Ref AdInventoryTable
+          AD_PERFORMANCE_TABLE: !Ref AdPerformanceTable
+          TARGETING_RULES_TABLE: !Ref TargetingRulesTable
+          AD_SCHEDULE_TABLE: !Ref AdScheduleTable
+          AD_CONTENT_BUCKET: !Ref AdContentBucket
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "AdServerFunction"
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import random
+          import uuid
+          from datetime import datetime, timezone
+          from decimal import Decimal
+          
+          def lambda_handler(event, context):
+              print(f"=== FULL EVENT ===")
+              print(json.dumps(event, indent=2))
+              
+              try:
+                  # Extract parameters from query string
+                  params = event.get('queryStringParameters', {}) or {}
+                  duration_ms = params.get('duration_ms')
+                  splice_event_id = params.get('splice_event_id')
+                  is_warmup = params.get('warmup', '').lower() == 'true'
+                  target_ad_id = params.get('target_ad_id')
+                  
+                  print(f"Received parameters - duration_ms: {duration_ms}, splice_event_id: {splice_event_id}, warmup: {is_warmup}, target_ad_id: {target_ad_id}")
+                  
+                  # Initialize ad selector
+                  selector = DynamicAdSelector()
+                  
+                  # Handle warmup request
+                  if is_warmup and target_ad_id:
+                      print(f"🔥 Processing warmup request for ad: {target_ad_id}")
+                      selected_ad = selector.get_ad_by_id(target_ad_id)
+                      if selected_ad:
+                          print(f"✅ Warmup ad found: {selected_ad.get('title', 'Unknown')}")
+                      else:
+                          print(f"❌ Warmup ad not found: {target_ad_id}")
+                  else:
+                      # Normal ad selection
+                      selected_ad = selector.select_optimal_ad(splice_event_id)
+                  
+                  if selected_ad:
+                      vast_xml = generate_vast_xml(selected_ad)
+                      
+                      if is_warmup:
+                          print(f"🔥 Warmup VAST generated for ad: {selected_ad['ad_id']}")
+                      
+                      return {
+                          'statusCode': 200,
+                          'headers': {
+                              'Content-Type': 'application/xml',
+                              'Access-Control-Allow-Origin': '*'
+                          },
+                          'body': vast_xml
+                      }
+                  else:
+                      # Return empty VAST when no ads available
+                      print("No ads available - returning empty VAST")
+                      return {
+                          'statusCode': 200,
+                          'headers': {
+                              'Content-Type': 'application/xml',
+                              'Access-Control-Allow-Origin': '*'
+                          },
+                          'body': '<?xml version="1.0" encoding="UTF-8"?><VAST version="4.0"></VAST>'
+                      }
+                      
+              except Exception as e:
+                  print(f"Error in ad server: {str(e)}")
+                  import traceback
+                  traceback.print_exc()
+                  return {
+                      'statusCode': 500,
+                      'headers': {
+                          'Content-Type': 'application/json',
+                          'Access-Control-Allow-Origin': '*',
+                          'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+                      },
+                      'body': json.dumps({'error': 'Internal server error', 'detail': str(e)})
+                  }
+          
+          class DynamicAdSelector:
+              def __init__(self):
+                  self.dynamodb = boto3.resource('dynamodb')
+                  self.ads_table = self.dynamodb.Table(os.environ['AD_INVENTORY_TABLE'])
+                  self.schedule_table = self.dynamodb.Table(os.environ['AD_SCHEDULE_TABLE'])
+                  
+              def select_optimal_ad(self, splice_event_id=None):
+                  try:
+                      print(f"Selecting ad for splice_event_id: {splice_event_id}")
+                      
+                      # First, check for scheduled ads
+                      scheduled_ad = self.get_scheduled_ad()
+                      if scheduled_ad:
+                          print(f"Found scheduled ad: {scheduled_ad.get('ad_id', 'unknown')}")
+                          return self.get_ad_by_id(scheduled_ad['ad_id'])
+                      
+                      # If no scheduled ad, get all active ads
+                      response = self.ads_table.scan(
+                          FilterExpression='#active = :active',
+                          ExpressionAttributeNames={'#active': 'active'},
+                          ExpressionAttributeValues={':active': 'true'}
+                      )
+                      
+                      eligible_ads = response.get('Items', [])
+                      print(f"Found {len(eligible_ads)} active ads")
+                      
+                      if not eligible_ads:
+                          print("No active ads found")
+                          return None
+                      
+                      # Simple weighted random selection
+                      weights = [float(ad.get('weight', 1.0)) for ad in eligible_ads]
+                      selected_ad = random.choices(eligible_ads, weights=weights)[0]
+                      print(f"Selected ad: {selected_ad.get('ad_id', 'unknown')} (duration: {selected_ad.get('duration', 'unknown')}s)")
+                      
+                      return selected_ad
+                      
+                  except Exception as e:
+                      print(f"Error selecting ad: {str(e)}")
+                      import traceback
+                      traceback.print_exc()
+                      return None
+              
+              def get_scheduled_ad(self):
+                  try:
+                      current_time = datetime.now(timezone.utc)
+                      current_minute = current_time.strftime('%Y-%m-%dT%H:%M')
+                      
+                      print(f"Checking for scheduled ads at: {current_minute}")
+                      
+                      # Get all scheduled ads and filter by time
+                      response = self.schedule_table.query(
+                          IndexName='status-time-index',
+                          KeyConditionExpression='#status = :status',
+                          ExpressionAttributeNames={'#status': 'status'},
+                          ExpressionAttributeValues={':status': 'scheduled'}
+                      )
+                      
+                      items = response.get('Items', [])
+                      print(f"Found {len(items)} total scheduled ads")
+                      
+                      # Filter by current minute
+                      matching_ads = []
+                      for item in items:
+                          schedule_time = item.get('schedule_time', '')
+                          if schedule_time.startswith(current_minute):
+                              matching_ads.append(item)
+                      
+                      if matching_ads:
+                          print(f"Found {len(matching_ads)} scheduled ads for current time")
+                          return matching_ads[0]  # Return first matching ad
+                      
+                      return None
+                      
+                  except Exception as e:
+                      print(f"Error getting scheduled ad: {str(e)}")
+                      import traceback
+                      traceback.print_exc()
+                      return None
+              
+              def get_ad_by_id(self, ad_id):
+                  try:
+                      response = self.ads_table.get_item(Key={'ad_id': ad_id})
+                      ad = response.get('Item')
+                      
+                      if ad and ad.get('active') == 'true':
+                          return ad
+                      else:
+                          print(f"Ad {ad_id} not found or not active")
+                          return None
+                          
+                  except Exception as e:
+                      print(f"Error getting ad by ID: {str(e)}")
+                      return None
+          
+          def generate_vast_xml(ad):
+              ad_id = ad['ad_id']
+              title = ad.get('title', 'Advertisement')
+              cdn_url = ad.get('cdn_url', '')
+              duration = ad.get('duration', 30)
+              click_url = ad.get('click_url', '')
+              impression_url = ad.get('impression_url', '')
+              
+              # Format duration as HH:MM:SS
+              duration_formatted = f"00:00:{int(duration):02d}"
+              
+              vast_xml = '''<?xml version="1.0" encoding="UTF-8"?>
+          <VAST version="4.0">
+              <Ad id="{ad_id}">
+                  <InLine>
+                      <AdSystem>Dynamic Ad Server</AdSystem>
+                      <AdTitle><![CDATA[{title}]]></AdTitle>
+                      <Impression><![CDATA[{impression_url}]]></Impression>
+                      <Creatives>
+                          <Creative id="video-{ad_id}">
+                              <Linear>
+                                  <Duration>{duration_formatted}</Duration>
+                                  <MediaFiles>
+                                      <MediaFile delivery="progressive" type="video/mp4" width="1920" height="1080">
+                                          <![CDATA[{cdn_url}]]>
+                                      </MediaFile>
+                                  </MediaFiles>
+                                  <VideoClicks>
+                                      <ClickThrough><![CDATA[{click_url}]]></ClickThrough>
+                                  </VideoClicks>
+                              </Linear>
+                          </Creative>
+                      </Creatives>
+                  </InLine>
+              </Ad>
+          </VAST>'''.format(
+                  ad_id=ad_id,
+                  title=title,
+                  impression_url=impression_url,
+                  cdn_url=cdn_url,
+                  click_url=click_url,
+                  duration_formatted=duration_formatted
+              )
+              
+              return vast_xml
+
+  AdManagementAPI:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-AdManagementAPI"
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt AdServerLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          AD_INVENTORY_TABLE: !Ref AdInventoryTable
+          AD_PERFORMANCE_TABLE: !Ref AdPerformanceTable
+          TARGETING_RULES_TABLE: !Ref TargetingRulesTable
+          AD_SCHEDULE_TABLE: !Ref AdScheduleTable
+          AD_CONTENT_BUCKET: !Ref AdContentBucket
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "AdManagementAPI"
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import uuid
+          import csv
+          import io
+          from datetime import datetime, timezone, timedelta
+          from decimal import Decimal
+          
+          def lambda_handler(event, context):
+              try:
+                  http_method = event['httpMethod']
+                  path = event['path']
+                  
+                  # Route requests
+                  if path.startswith('/api/ads'):
+                      return handle_ads_api(event, context)
+                  elif path.startswith('/api/schedule'):
+                      return handle_schedule_api(event, context)
+                  elif path.startswith('/api/targeting'):
+                      return handle_targeting_api(event, context)
+                  elif path.startswith('/api/analytics/export'):
+                      return handle_analytics_export(event, context)
+                  else:
+                      return {
+                          'statusCode': 404,
+                          'body': json.dumps({'error': 'Endpoint not found'})
+                      }
+                      
+              except Exception as e:
+                  print(f"Error in management API: {str(e)}")
+                  import traceback
+                  traceback.print_exc()
+                  return {
+                      'statusCode': 500,
+                      'headers': {
+                          'Content-Type': 'application/json',
+                          'Access-Control-Allow-Origin': '*',
+                          'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                          'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                      },
+                      'body': json.dumps({'error': 'Internal server error', 'detail': str(e)})
+                  }
+          
+          def handle_ads_api(event, context):
+              method = event['httpMethod']
+              path = event['path']
+              path_parameters = event.get('pathParameters', {})
+              
+              # Extract ad_id from path parameters if present
+              ad_id = path_parameters.get('ad_id') if path_parameters else None
+              
+              if method == 'GET' and path == '/api/ads':
+                  return list_ads(event, context)
+              elif method == 'POST' and path == '/api/ads':
+                  return create_ad(event, context)
+              elif method == 'PUT' and ad_id and path.endswith('/status'):
+                  return update_ad_status(ad_id, event, context)
+              elif method == 'DELETE' and ad_id:
+                  return delete_ad(ad_id, event, context)
+              else:
+                  return {
+                      'statusCode': 405,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'error': 'Method not allowed'})
+                  }
+          
+          def create_ad(event, context):
+              try:
+                  body = json.loads(event['body'])
+                  ad_id = str(uuid.uuid4())
+                  
+                  # Generate pre-signed URL for S3 upload
+                  s3_client = boto3.client('s3', region_name='ap-northeast-2')
+                  bucket = os.environ['AD_CONTENT_BUCKET']
+                  key = f"videos/{ad_id}.mp4"
+                  
+                  presigned_url = s3_client.generate_presigned_url(
+                      'put_object',
+                      Params={
+                          'Bucket': bucket,
+                          'Key': key,
+                          'ContentType': 'video/mp4'
+                      },
+                      ExpiresIn=3600
+                  )
+                  
+                  # Create ad record in DynamoDB
+                  dynamodb = boto3.resource('dynamodb')
+                  table = dynamodb.Table(os.environ['AD_INVENTORY_TABLE'])
+                  
+                  ad_data = {
+                      'ad_id': ad_id,
+                      'title': body['title'],
+                      'advertiser': body.get('advertiser', ''),
+                      'campaign_id': body.get('campaign_id', 'default'),
+                      'duration': int(body['duration']),
+                      's3_key': key,
+                      'upload_status': 'PENDING',
+                      'active': str(body.get('active', True)).lower(),
+                      'weight': Decimal('1.0'),
+                      'priority': 5,
+                      'created_at': datetime.now(timezone.utc).isoformat(),
+                      'updated_at': datetime.now(timezone.utc).isoformat()
+                  }
+                  
+                  table.put_item(Item=ad_data)
+                  
+                  return {
+                      'statusCode': 201,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({
+                          'ad_id': ad_id,
+                          'upload_url': presigned_url,
+                          'message': '광고 생성됨. 파일을 업로드하세요.'
+                      })
+                  }
+                  
+              except Exception as e:
+                  print(f"Error creating ad: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': 'Failed to create ad'})
+                  }
+          
+          def list_ads(event, context):
+              try:
+                  dynamodb = boto3.resource('dynamodb')
+                  table = dynamodb.Table(os.environ['AD_INVENTORY_TABLE'])
+                  
+                  response = table.scan()
+                  items = response.get('Items', [])
+                  
+                  # Convert Decimal to float for JSON serialization
+                  for item in items:
+                      for key, value in item.items():
+                          if isinstance(value, Decimal):
+                              item[key] = float(value)
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'ads': items})
+                  }
+                  
+              except Exception as e:
+                  print(f"Error listing ads: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'error': 'Failed to list ads'})
+                  }
+          
+          def update_ad_status(ad_id, event, context):
+              try:
+                  body = json.loads(event['body'])
+                  active = body.get('active')
+                  
+                  if active is None:
+                      return {
+                          'statusCode': 400,
+                          'headers': {'Access-Control-Allow-Origin': '*'},
+                          'body': json.dumps({'error': 'Missing active field'})
+                      }
+                  
+                  # Convert to string for DynamoDB
+                  active_str = str(active).lower()
+                  
+                  dynamodb = boto3.resource('dynamodb')
+                  table = dynamodb.Table(os.environ['AD_INVENTORY_TABLE'])
+                  
+                  # Update the ad status
+                  response = table.update_item(
+                      Key={'ad_id': ad_id},
+                      UpdateExpression='SET active = :active, updated_at = :updated_at',
+                      ExpressionAttributeValues={
+                          ':active': active_str,
+                          ':updated_at': datetime.now(timezone.utc).isoformat()
+                      },
+                      ReturnValues='ALL_NEW'
+                  )
+                  
+                  # Convert Decimal to float for JSON serialization
+                  updated_item = response['Attributes']
+                  for key, value in updated_item.items():
+                      if isinstance(value, Decimal):
+                          updated_item[key] = float(value)
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({
+                          'message': 'Ad status updated successfully',
+                          'ad': updated_item
+                      })
+                  }
+                  
+              except Exception as e:
+                  print(f"Error updating ad status: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'error': 'Failed to update ad status'})
+                  }
+          
+          def delete_ad(ad_id, event, context):
+              try:
+                  dynamodb = boto3.resource('dynamodb')
+                  
+                  # Check if ad has active schedules
+                  schedule_table = dynamodb.Table(os.environ['AD_SCHEDULE_TABLE'])
+                  
+                  # Query for schedules with this ad_id
+                  schedule_response = schedule_table.scan(
+                      FilterExpression='ad_id = :ad_id AND #status = :status',
+                      ExpressionAttributeNames={'#status': 'status'},
+                      ExpressionAttributeValues={
+                          ':ad_id': ad_id,
+                          ':status': 'scheduled'
+                      }
+                  )
+                  
+                  if schedule_response['Items']:
+                      return {
+                          'statusCode': 400,
+                          'headers': {'Access-Control-Allow-Origin': '*'},
+                          'body': json.dumps({
+                              'error': 'Cannot delete ad with active schedules',
+                              'active_schedules': len(schedule_response['Items'])
+                          })
+                      }
+                  
+                  # Delete the ad
+                  ad_table = dynamodb.Table(os.environ['AD_INVENTORY_TABLE'])
+                  ad_table.delete_item(Key={'ad_id': ad_id})
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'message': 'Ad deleted successfully'})
+                  }
+                  
+              except Exception as e:
+                  print(f"Error deleting ad: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'error': 'Failed to delete ad'})
+                  }
+          
+          def handle_schedule_api(event, context):
+              method = event['httpMethod']
+              path = event['path']
+              
+              if method == 'POST' and path == '/api/schedule':
+                  return create_schedule(event, context)
+              elif method == 'GET' and path == '/api/schedule':
+                  return list_schedules(event, context)
+              elif method == 'DELETE' and '/api/schedule/' in path:
+                  return delete_schedule(event, context)
+              else:
+                  return {
+                      'statusCode': 405,
+                      'body': json.dumps({'error': 'Method not allowed'})
+                  }
+          
+          def create_schedule(event, context):
+              try:
+                  body = json.loads(event['body'])
+                  schedule_id = str(uuid.uuid4())
+                  
+                  # Validate required fields
+                  required_fields = ['scheduleTime', 'selectedAdId', 'duration', 'eventName']
+                  for field in required_fields:
+                      if field not in body:
+                          return {
+                              'statusCode': 400,
+                              'body': json.dumps({'error': f'Missing required field: {field}'})
+                          }
+                  
+                  # Create schedule record
+                  dynamodb = boto3.resource('dynamodb')
+                  schedule_table = dynamodb.Table(os.environ['AD_SCHEDULE_TABLE'])
+                  
+                  # Set TTL for 24 hours after schedule time
+                  schedule_time = datetime.fromisoformat(body['scheduleTime'].replace('Z', '+00:00'))
+                  ttl = int((schedule_time.timestamp() + 86400))  # +24 hours
+                  
+                  schedule_data = {
+                      'schedule_id': schedule_id,
+                      'schedule_time': body['scheduleTime'],
+                      'ad_id': body['selectedAdId'],
+                      'duration': int(body['duration']),
+                      'event_name': body['eventName'],
+                      'status': 'scheduled',
+                      'ttl': ttl,
+                      'created_at': datetime.now(timezone.utc).isoformat(),
+                      'created_by': body.get('createdBy', 'system')
+                  }
+                  
+                  schedule_table.put_item(Item=schedule_data)
+                  
+                  return {
+                      'statusCode': 201,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({
+                          'schedule_id': schedule_id,
+                          'message': '광고 스케줄이 생성되었습니다.',
+                          'schedule': schedule_data
+                      })
+                  }
+                  
+              except Exception as e:
+                  print(f"Error creating schedule: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': 'Failed to create schedule'})
+                  }
+          
+          def list_schedules(event, context):
+              try:
+                  dynamodb = boto3.resource('dynamodb')
+                  schedule_table = dynamodb.Table(os.environ['AD_SCHEDULE_TABLE'])
+                  
+                  # Get query parameters
+                  params = event.get('queryStringParameters') or {}
+                  status = params.get('status', 'scheduled')
+                  
+                  print(f"Listing schedules with status: {status}")
+                  
+                  response = schedule_table.query(
+                      IndexName='status-time-index',
+                      KeyConditionExpression='#status = :status',
+                      ExpressionAttributeNames={'#status': 'status'},
+                      ExpressionAttributeValues={':status': status}
+                  )
+                  
+                  items = response.get('Items', [])
+                  print(f"Found {len(items)} schedules")
+                  
+                  # Convert Decimal to float for JSON serialization
+                  for item in items:
+                      for key, value in item.items():
+                          if isinstance(value, Decimal):
+                              item[key] = float(value)
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'schedules': items})
+                  }
+                  
+              except Exception as e:
+                  print(f"Error listing schedules: {str(e)}")
+                  import traceback
+                  traceback.print_exc()
+                  return {
+                      'statusCode': 500,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'error': 'Failed to list schedules', 'detail': str(e)})
+                  }
+          
+          def delete_schedule(event, context):
+              try:
+                  path_parts = event['path'].split('/')
+                  schedule_id = path_parts[-1]
+                  
+                  dynamodb = boto3.resource('dynamodb')
+                  schedule_table = dynamodb.Table(os.environ['AD_SCHEDULE_TABLE'])
+                  
+                  schedule_table.delete_item(Key={'schedule_id': schedule_id})
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'message': '스케줄이 삭제되었습니다.'})
+                  }
+                  
+              except Exception as e:
+                  print(f"Error deleting schedule: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': 'Failed to delete schedule'})
+                  }
+          
+          def handle_targeting_api(event, context):
+              return {
+                  'statusCode': 501,
+                  'body': json.dumps({'message': 'Targeting API - Coming in Phase 2'})
+              }
+          
+          def handle_analytics_api(event, context):
+              return {
+                  'statusCode': 501,
+                  'body': json.dumps({'message': 'Analytics API - Coming in Phase 3'})
+              }
+          
+          def handle_analytics_export(event, context):
+              try:
+                  query_params = event.get('queryStringParameters', {}) or {}
+                  start_date = query_params.get('start', (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y-%m-%d'))
+                  end_date = query_params.get('end', datetime.now(timezone.utc).strftime('%Y-%m-%d'))
+                  
+                  # Get performance data
+                  performance_data = get_performance_data(start_date, end_date)
+                  
+                  # Get ad inventory data for mapping
+                  ads_data = get_ads_inventory()
+                  
+                  # Generate CSV
+                  csv_data = generate_analytics_csv(performance_data, ads_data)
+                  
+                  # Return CSV as response
+                  return {
+                      'statusCode': 200,
+                      'headers': {
+                          'Content-Type': 'text/csv; charset=utf-8',
+                          'Content-Disposition': f'attachment; filename="ad_analytics_{start_date}_to_{end_date}.csv"',
+                          'Access-Control-Allow-Origin': '*',
+                          'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent',
+                          'Access-Control-Allow-Methods': 'GET,OPTIONS',
+                          'Access-Control-Expose-Headers': 'Content-Disposition'
+                      },
+                      'body': csv_data
+                  }
+                  
+              except Exception as e:
+                  print(f"Error exporting analytics: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'error': 'Failed to export analytics'})
+                  }
+
+          def get_performance_data(start_date, end_date):
+              try:
+                  dynamodb = boto3.resource('dynamodb')
+                  table = dynamodb.Table(os.environ['AD_SCHEDULE_TABLE'])
+                  
+                  # Convert dates to ISO format for DynamoDB query
+                  start_iso = f"{start_date}T00:00:00"
+                  end_iso = f"{end_date}T23:59:59"
+                  
+                  # Scan with filter for schedule_time in date range
+                  response = table.scan(
+                      FilterExpression='schedule_time BETWEEN :start AND :end',
+                      ExpressionAttributeValues={
+                          ':start': start_iso,
+                          ':end': end_iso
+                      }
+                  )
+                  
+                  return response.get('Items', [])
+              except Exception as e:
+                  print(f"Error getting schedule data: {str(e)}")
+                  return []
+
+          def get_ads_inventory():
+              try:
+                  dynamodb = boto3.resource('dynamodb')
+                  table = dynamodb.Table(os.environ['AD_INVENTORY_TABLE'])
+                  response = table.scan()
+                  ads = response.get('Items', [])
+                  
+                  # Create a mapping dictionary
+                  ads_map = {}
+                  for ad in ads:
+                      ads_map[ad['ad_id']] = ad
+                  
+                  return ads_map
+              except Exception as e:
+                  print(f"Error getting ads inventory: {str(e)}")
+                  return {}
+
+          def generate_analytics_csv(schedule_data, ads_data):
+              # Aggregate schedule data by ad_id (using schedule data instead of performance events)
+              ad_stats = {}
+              
+              for schedule in schedule_data:
+                  ad_id = schedule.get('ad_id', 'unknown')
+                  status = schedule.get('status', 'scheduled')
+                  duration = schedule.get('duration', 0)
+                  
+                  if ad_id not in ad_stats:
+                      ad_stats[ad_id] = {
+                          'ad_id': ad_id,
+                          'insertions': 0,
+                          'success': 0,
+                          'failure': 0,
+                          'total_duration': 0
+                      }
+                  
+                  # Count insertions (all schedules)
+                  ad_stats[ad_id]['insertions'] += 1
+                  
+                  # Count success/failure based on schedule status
+                  if status == 'completed':
+                      ad_stats[ad_id]['success'] += 1
+                  elif status in ['scheduled', 'active']:
+                      # These are not failures, just not completed yet
+                      pass
+                  else:
+                      # Any other status considered as failure
+                      ad_stats[ad_id]['failure'] += 1
+                  
+                  # Add duration
+                  if isinstance(duration, Decimal):
+                      duration = int(duration)
+                  ad_stats[ad_id]['total_duration'] += duration
+              
+              # Create CSV content
+              csv_buffer = io.StringIO()
+              writer = csv.writer(csv_buffer)
+              
+              # If no schedule data, include all ads with zero stats
+              if not ad_stats:
+                  for ad_id, ad_info in ads_data.items():
+                      ad_stats[ad_id] = {
+                          'ad_id': ad_id,
+                          'insertions': 0,
+                          'success': 0,
+                          'failure': 0,
+                          'total_duration': 0
+                      }
+              
+              # Write header (English)
+              writer.writerow([
+                  'Ad ID', 'Ad Name', 'Advertiser', 'Insertions', 
+                  'Success', 'Failure', 'Success Rate (%)', 'Total Duration (sec)'
+              ])
+              
+              # Write data rows
+              for ad_id, stats in ad_stats.items():
+                  ad_info = ads_data.get(ad_id, {})
+                  ad_name = ad_info.get('title', 'Unknown')
+                  advertiser = ad_info.get('advertiser', 'Unknown')
+                  
+                  insertions = stats['insertions']
+                  success = stats['success']
+                  failure = stats['failure']
+                  
+                  # Calculate success rate
+                  success_rate = 0
+                  if insertions > 0:
+                      success_rate = round((success / insertions) * 100, 1)
+                  
+                  writer.writerow([
+                      ad_id,
+                      ad_name,
+                      advertiser,
+                      insertions,
+                      success,
+                      failure,
+                      success_rate,
+                      stats['total_duration']
+                  ])
+              
+              return csv_buffer.getvalue()
+
+  S3EventProcessor:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-S3EventProcessor"
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt AdServerLambdaRole.Arn
+      Timeout: 60
+      MemorySize: 1024
+      Environment:
+        Variables:
+          AD_INVENTORY_TABLE: !Ref AdInventoryTable
+          AD_CONTENT_BUCKET: !Ref AdContentBucket
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "S3EventProcessor"
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          from datetime import datetime, timezone
+          from urllib.parse import unquote_plus
+          
+          def lambda_handler(event, context):
+              try:
+                  for record in event['Records']:
+                      bucket = record['s3']['bucket']['name']
+                      key = unquote_plus(record['s3']['object']['key'])
+                      
+                      if key.startswith('videos/') and key.endswith('.mp4'):
+                          process_uploaded_video(bucket, key)
+                          
+                  return {'statusCode': 200, 'body': 'Processed successfully'}
+                  
+              except Exception as e:
+                  print(f"Error processing S3 event: {str(e)}")
+                  return {'statusCode': 500, 'body': 'Processing failed'}
+          
+          def process_uploaded_video(bucket, key):
+              try:
+                  # Extract ad_id from filename
+                  filename = os.path.basename(key)
+                  ad_id = filename.replace('.mp4', '')
+                  
+                  # Get S3 object info
+                  s3_client = boto3.client('s3')
+                  response = s3_client.head_object(Bucket=bucket, Key=key)
+                  file_size = response['ContentLength']
+                  
+                  # Update DynamoDB record
+                  dynamodb = boto3.resource('dynamodb')
+                  table = dynamodb.Table(os.environ['AD_INVENTORY_TABLE'])
+                  
+                  # Generate CDN URL  
+                  cdn_url = f"https://{bucket}.s3.amazonaws.com/{key}"
+                  
+                  table.update_item(
+                      Key={'ad_id': ad_id},
+                      UpdateExpression='''
+                          SET upload_status = :status,
+                              file_size = :size,
+                              video_format = :format,
+                              cdn_url = :cdn_url,
+                              active = :active,
+                              updated_at = :updated_at
+                      ''',
+                      ExpressionAttributeValues={
+                          ':status': 'COMPLETED',
+                          ':size': file_size,
+                          ':format': 'mp4',
+                          ':cdn_url': cdn_url,
+                          ':active': 'true',
+                          ':updated_at': datetime.now(timezone.utc).isoformat()
+                      }
+                  )
+                  
+                  print(f"Ad {ad_id} activated successfully")
+                  
+              except Exception as e:
+                  print(f"Error processing video {key}: {str(e)}")
+
+          def handle_analytics_export(event, context):
+              try:
+                  query_params = event.get('queryStringParameters', {}) or {}
+                  start_date = query_params.get('start', (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y-%m-%d'))
+                  end_date = query_params.get('end', datetime.now(timezone.utc).strftime('%Y-%m-%d'))
+                  
+                  # Get performance data
+                  performance_data = get_performance_data(start_date, end_date)
+                  
+                  # Get ad inventory data for mapping
+                  ads_data = get_ads_inventory()
+                  
+                  # Generate CSV
+                  csv_data = generate_analytics_csv(performance_data, ads_data)
+                  
+                  # Return CSV as response
+                  return {
+                      'statusCode': 200,
+                      'headers': {
+                          'Content-Type': 'text/csv; charset=utf-8',
+                          'Content-Disposition': f'attachment; filename="ad_analytics_{start_date}_to_{end_date}.csv"',
+                          'Access-Control-Allow-Origin': '*',
+                          'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent',
+                          'Access-Control-Allow-Methods': 'GET,OPTIONS',
+                          'Access-Control-Expose-Headers': 'Content-Disposition'
+                      },
+                      'body': csv_data
+                  }
+                  
+              except Exception as e:
+                  print(f"Error exporting analytics: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'error': 'Failed to export analytics'})
+                  }
+
+
+
+  # Lambda function to initialize test data
+  InitializeTestDataLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-InitializeTestData"
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt AdServerLambdaRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          AD_INVENTORY_TABLE: !Ref AdInventoryTable
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "InitializeTestData"
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          from datetime import datetime, timezone
+          from decimal import Decimal
+          import uuid
+          
+          def handler(event, context):
+              try:
+                  if event['RequestType'] == 'Create':
+                      dynamodb = boto3.resource('dynamodb')
+                      table = dynamodb.Table(event['ResourceProperties']['TableName'])
+                      
+                      # Insert test ad data
+                      test_ads = [
+                          {
+                              'ad_id': str(uuid.uuid4()),
+                              'title': 'Test Ad 15 seconds',
+                              'advertiser': 'Test Advertiser',
+                              'campaign_id': 'test-campaign-1',
+                              'duration': 15,
+                              'active': 'true',
+                              'weight': Decimal('1.0'),
+                              'priority': 5,
+                              'cdn_url': 'https://example.com/test-ad-15s.mp4',
+                              'click_url': 'https://example.com/click',
+                              'impression_url': 'https://example.com/impression',
+                              'created_at': datetime.now(timezone.utc).isoformat(),
+                              'updated_at': datetime.now(timezone.utc).isoformat()
+                          },
+                          {
+                              'ad_id': str(uuid.uuid4()),
+                              'title': 'Test Ad 30 seconds',
+                              'advertiser': 'Test Advertiser',
+                              'campaign_id': 'test-campaign-2',
+                              'duration': 30,
+                              'active': 'true',
+                              'weight': Decimal('1.5'),
+                              'priority': 5,
+                              'cdn_url': 'https://example.com/test-ad-30s.mp4',
+                              'click_url': 'https://example.com/click',
+                              'impression_url': 'https://example.com/impression',
+                              'created_at': datetime.now(timezone.utc).isoformat(),
+                              'updated_at': datetime.now(timezone.utc).isoformat()
+                          }
+                      ]
+                      
+                      for ad in test_ads:
+                          table.put_item(Item=ad)
+                          print(f"Inserted test ad: {ad['ad_id']}")
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Message': 'Test data initialized'})
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Message': 'No action needed'})
+                      
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  # Custom Resource to initialize test data
+  InitializeTestDataCustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt InitializeTestDataLambda.Arn
+      TableName: !Ref AdInventoryTable
+    DependsOn:
+      - AdInventoryTable
+      - InitializeTestDataLambda
+
+  # Custom Resource Lambda for S3 Notification Setup
+  S3NotificationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-S3NotificationSetup"
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt S3NotificationLambdaRole.Arn
+      Timeout: 60
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "S3NotificationSetup"
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import cfnresponse
+          
+          def handler(event, context):
+              try:
+                  s3 = boto3.client('s3')
+                  bucket_name = event['ResourceProperties']['BucketName']
+                  lambda_arn = event['ResourceProperties']['LambdaFunctionArn']
+                  
+                  if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                      notification_config = {
+                          'LambdaFunctionConfigurations': [
+                              {
+                                  'Id': 'AdUploadProcessor',
+                                  'LambdaFunctionArn': lambda_arn,
+                                  'Events': ['s3:ObjectCreated:*'],
+                                  'Filter': {
+                                      'Key': {
+                                          'FilterRules': [
+                                              {
+                                                  'Name': 'prefix',
+                                                  'Value': 'videos/'
+                                              },
+                                              {
+                                                  'Name': 'suffix',
+                                                  'Value': '.mp4'
+                                              }
+                                          ]
+                                      }
+                                  }
+                              }
+                          ]
+                      }
+                      s3.put_bucket_notification_configuration(
+                          Bucket=bucket_name,
+                          NotificationConfiguration=notification_config
+                      )
+                  elif event['RequestType'] == 'Delete':
+                      s3.put_bucket_notification_configuration(
+                          Bucket=bucket_name,
+                          NotificationConfiguration={}
+                      )
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  # ============================================
+  # API Gateway
+  # ============================================
+  AdManagementApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub "${AWS::StackName}-AdManagementAPI"
+      Description: "Dynamic Ad Management API"
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ResourceType
+          Value: "AdManagementAPI"
+
+  # API Resources
+  ApiGatewayResourceApi:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !GetAtt AdManagementApiGateway.RootResourceId
+      PathPart: api
+
+  ApiGatewayResourceAds:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceApi
+      PathPart: ads
+
+  # Phase 2: New resources for Ad ID path parameter
+  ApiGatewayResourceAdsId:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceAds
+      PathPart: "{ad_id}"
+
+  # Status resource for active toggle
+  ApiGatewayResourceAdsIdStatus:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceAdsId
+      PathPart: status
+
+  ApiGatewayResourceSchedule:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceApi
+      PathPart: schedule
+
+  ApiGatewayResourceScheduleId:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceSchedule
+      PathPart: "{scheduleId}"
+
+  ApiGatewayResourceAnalytics:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceApi
+      PathPart: analytics
+
+  ApiGatewayResourceAnalyticsExport:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceAnalytics
+      PathPart: export
+
+  # MediaLive Integration Resources
+  ApiGatewayResourceMediaLive:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !GetAtt AdManagementApiGateway.RootResourceId
+      PathPart: medialive
+
+  ApiGatewayResourceMediaLiveChannel:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceMediaLive
+      PathPart: channel
+
+  ApiGatewayResourceMediaLiveChannelId:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceMediaLiveChannel
+      PathPart: "{channelId}"
+
+  # 핵심 엔드포인트: 연결 테스트
+  ApiGatewayResourceMediaLiveChannelTest:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceMediaLiveChannelId
+      PathPart: test
+
+  # 핵심 엔드포인트: SCTE-35 스케줄 생성
+  ApiGatewayResourceMediaLiveChannelSchedule:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceMediaLiveChannelId
+      PathPart: schedule
+
+  # Phase 4: SCTE-35 스케줄 삭제 - {actionName} 리소스
+  ApiGatewayResourceMediaLiveChannelScheduleActionName:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceMediaLiveChannelSchedule
+      PathPart: "{actionName}"
+
+  # Ad Server Resource (clear separation from management API)
+  ApiGatewayResourceAdServer:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !GetAtt AdManagementApiGateway.RootResourceId
+      PathPart: adserver
+
+  # API Methods
+  ApiGatewayMethodAdsGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAds
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdManagementAPI.Arn}/invocations"
+
+  ApiGatewayMethodAdsPOST:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAds
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdManagementAPI.Arn}/invocations"
+
+  # Phase 2: New API Methods for Ad Management
+  # PUT /api/ads/{ad_id}/status - Toggle active status
+  ApiGatewayMethodAdsIdStatusPUT:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAdsIdStatus
+      HttpMethod: PUT
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.ad_id: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdManagementAPI.Arn}/invocations"
+
+  # DELETE /api/ads/{ad_id} - Delete ad
+  ApiGatewayMethodAdsIdDELETE:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAdsId
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.ad_id: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdManagementAPI.Arn}/invocations"
+
+  # CORS Options for Management API
+  ApiGatewayMethodAdsOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAds
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  # CORS Options for new endpoints
+  ApiGatewayMethodAdsIdOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAdsId
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Methods: "'DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  ApiGatewayMethodAdsIdStatusOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAdsIdStatus
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Methods: "'PUT,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  # Schedule API Methods
+  ApiGatewayMethodScheduleGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceSchedule
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdManagementAPI.Arn}/invocations"
+
+  ApiGatewayMethodSchedulePOST:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceSchedule
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdManagementAPI.Arn}/invocations"
+
+  ApiGatewayMethodScheduleOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceSchedule
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  # Schedule Delete API Methods
+  ApiGatewayMethodScheduleDELETE:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceScheduleId
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.scheduleId: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdManagementAPI.Arn}/invocations"
+
+  ApiGatewayMethodScheduleIdOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceScheduleId
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Methods: "'DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  # Analytics Export API Methods
+  ApiGatewayMethodAnalyticsExportGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAnalyticsExport
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdManagementAPI.Arn}/invocations"
+
+  ApiGatewayMethodAnalyticsExportOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAnalyticsExport
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  ApiGatewayMethodAdServerGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAdServer
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DynamicAdServer.Arn}/invocations"
+
+  # CORS Options Methods
+  ApiGatewayMethodAdServerOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAdServer
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  # 핵심 MediaLive API Methods
+  # 1. 연결 테스트: GET /medialive/channel/{channelId}/test
+  ApiGatewayMethodMediaLiveChannelTestGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceMediaLiveChannelTest
+      HttpMethod: GET
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.channelId: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MediaLiveIntegration.Arn}/invocations"
+
+  # 2. SCTE-35 스케줄 생성: POST /medialive/channel/{channelId}/schedule
+  ApiGatewayMethodMediaLiveChannelSchedulePOST:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceMediaLiveChannelSchedule
+      HttpMethod: POST
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.channelId: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MediaLiveIntegration.Arn}/invocations"
+
+  # 3. SCTE-35 스케줄 삭제: DELETE /medialive/channel/{channelId}/schedule/{actionName} (Phase 4)
+  ApiGatewayMethodMediaLiveChannelScheduleDELETE:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceMediaLiveChannelScheduleActionName
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.channelId: true
+        method.request.path.actionName: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MediaLiveIntegration.Arn}/invocations"
+
+  # MediaLive CORS Options (단순화)
+  ApiGatewayMethodMediaLiveChannelTestOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceMediaLiveChannelTest
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  ApiGatewayMethodMediaLiveChannelScheduleOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceMediaLiveChannelSchedule
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  # Phase 4: DELETE 엔드포인트용 CORS OPTIONS
+  ApiGatewayMethodMediaLiveChannelScheduleActionNameOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceMediaLiveChannelScheduleActionName
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ApiGatewayMethodAdsGET
+      - ApiGatewayMethodAdsPOST
+      - ApiGatewayMethodAdsOPTIONS
+      - ApiGatewayMethodAdsIdDELETE
+      - ApiGatewayMethodAdsIdOPTIONS
+      - ApiGatewayMethodAdsIdStatusPUT
+      - ApiGatewayMethodAdsIdStatusOPTIONS
+      - ApiGatewayMethodScheduleGET
+      - ApiGatewayMethodSchedulePOST
+      - ApiGatewayMethodScheduleOPTIONS
+      - ApiGatewayMethodScheduleDELETE
+      - ApiGatewayMethodScheduleIdOPTIONS
+      - ApiGatewayMethodAnalyticsExportGET
+      - ApiGatewayMethodAnalyticsExportOPTIONS
+      - ApiGatewayMethodAdServerGET
+      - ApiGatewayMethodMediaLiveChannelTestGET
+      - ApiGatewayMethodMediaLiveChannelSchedulePOST
+      - ApiGatewayMethodMediaLiveChannelScheduleDELETE
+      - ApiGatewayMethodMediaLiveChannelTestOPTIONS
+      - ApiGatewayMethodMediaLiveChannelScheduleOPTIONS
+      - ApiGatewayMethodMediaLiveChannelScheduleActionNameOPTIONS
+      - ApiGatewayMethodAdServerOPTIONS
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      StageName: prod
+
+  # ============================================
+  # Lambda Permissions
+  # ============================================
+  AdManagementAPIPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AdManagementAPI
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${AdManagementApiGateway}/*/*"
+
+  DynamicAdServerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DynamicAdServer
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${AdManagementApiGateway}/*/*"
+
+  S3EventProcessorPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref S3EventProcessor
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt AdContentBucket.Arn
+
+  MediaLiveIntegrationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref MediaLiveIntegration
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${AdManagementApiGateway}/*/*"
+
+  # ============================================
+  # Custom Resource for S3 Notification
+  # ============================================
+  S3NotificationCustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt S3NotificationLambda.Arn
+      BucketName: !Ref AdContentBucket
+      LambdaFunctionArn: !GetAtt S3EventProcessor.Arn
+    DependsOn:
+      - S3EventProcessorPermission
+      - AdContentBucket
+      - S3EventProcessor
+      - S3NotificationLambda
+
+  # ============================================
+  # MediaTailor Configuration
+  # ============================================
+  MediaTailorConfiguration:
+    Type: AWS::MediaTailor::PlaybackConfiguration
+    Properties:
+      Name: !Sub "${StreamName}-${Environment}"
+      VideoContentSourceUrl: !Ref MediaPackageEndpointUrl
+      AdDecisionServerUrl: !Sub 
+        - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/prod/adserver"
+        - ApiId: !Ref AdManagementApiGateway
+      PersonalizationThresholdSeconds: 1
+      Tags:
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: "DynamicAdManagement"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StreamName
+          Value: !Ref StreamName
+        - Key: ResourceType
+          Value: "MediaTailorConfig"
+    DependsOn:
+      - ApiGatewayDeployment
+
+# ============================================
+# Outputs
+# ============================================
+Outputs:
+  AdServerURL:
+    Description: "Dynamic Ad Server URL for MediaTailor"
+    Value: !Sub 
+      - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/prod/adserver"
+      - ApiId: !Ref AdManagementApiGateway
+    Export:
+      Name: !Sub "${AWS::StackName}-AdServerURL"
+  
+  ManagementAPIURL:
+    Description: "Ad Management API Base URL"
+    Value: !Sub 
+      - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/prod/api/ads"
+      - ApiId: !Ref AdManagementApiGateway
+    Export:
+      Name: !Sub "${AWS::StackName}-ManagementAPIURL"
+  
+  MediaLiveAPIURL:
+    Description: "MediaLive Integration API Base URL"
+    Value: !Sub 
+      - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/prod"
+      - ApiId: !Ref AdManagementApiGateway
+    Export:
+      Name: !Sub "${AWS::StackName}-MediaLiveAPIURL"
+  
+  AdContentBucketName:
+    Description: "S3 Bucket for Ad Content"
+    Value: !Ref AdContentBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-AdContentBucket"
+  
+  MediaTailorPlaybackURL:
+    Description: "MediaTailor Playback URL"
+    Value: !GetAtt MediaTailorConfiguration.PlaybackEndpointPrefix
+    Export:
+      Name: !Sub "${AWS::StackName}-MediaTailorPlaybackURL"
+  
+  DynamoDBTables:
+    Description: "Created DynamoDB Tables"
+    Value: !Sub "${AdInventoryTable}, ${AdPerformanceTable}, ${TargetingRulesTable}"
+    Export:
+      Name: !Sub "${AWS::StackName}-DynamoDBTables"

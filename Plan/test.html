@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+    <video id="video" controls autoplay width="800" height="450"></video>
+    <script>
+        const video = document.getElementById('video');
+        if (Hls.isSupported()) {
+            const hls = new Hls({
+                debug: true,
+                enableWorker: false
+            });
+            hls.loadSource('https://32b18c77c40d4e85af72dad4a38295bd.mediatailor.ap-northeast-2.amazonaws.com/v1/master/16a14189e466a8ec71284eb7f0862d231ff463ad/live-stream-demo/index.m3u8');
+            hls.attachMedia(video);
+            
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                console.log('매니페스트 로드됨');
+                video.play();
+            });
+        }
+    </script>
+</body>
+</html>

@@ -102,30 +102,6 @@ export const adAPI = {
 
 // 분석 데이터 내보내기 API
 export const analyticsAPI = {
-  // 실시간 메트릭 조회
-  getRealtimeMetrics: async (params = {}) => {
-    try {
-      const queryString = new URLSearchParams(params).toString();
-      const response = await api.get(`/api/analytics/realtime?${queryString}`);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching realtime metrics:', error);
-      throw error;
-    }
-  },
-
-  // MediaTailor 로그 조회
-  getMediaTailorLogs: async (params = {}) => {
-    try {
-      const queryString = new URLSearchParams(params).toString();
-      const response = await api.get(`/api/analytics/mediatailor?${queryString}`);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching MediaTailor logs:', error);
-      throw error;
-    }
-  },
-
   // CSV 내보내기
   exportCSV: async (startDate, endDate) => {
     try {
@@ -168,6 +144,17 @@ export const analyticsAPI = {
       return { success: true };
     } catch (error) {
       console.error('Error exporting CSV:', error);
+      throw error;
+    }
+  },
+
+  // MediaTailor 로그 데이터 조회
+  getMediaTailorLogs: async (hours = 24) => {
+    try {
+      const response = await api.get(`/api/analytics/mediatailor-logs?hours=${hours}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching MediaTailor logs:', error);
       throw error;
     }
   }

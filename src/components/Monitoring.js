@@ -45,9 +45,13 @@ const Monitoring = () => {
   // 광고 성과 데이터 로드
   const loadAdPerformanceData = async () => {
     try {
-      const [adsData, schedulesData] = await Promise.all([
+      const [adsData, schedulesData, mediaTailorData] = await Promise.all([
         adAPI.getAds(),
-        scheduleAPI.getSchedules()
+        scheduleAPI.getSchedules(),
+        analyticsAPI.getMediaTailorLogs(24).catch(error => {
+          console.warn('MediaTailor logs not available, using fallback data:', error);
+          return null;
+        })
       ]);
 
       // 날짜 범위 필터링
@@ -292,21 +296,41 @@ const Monitoring = () => {
         ? new Set(adsData.map(ad => ad.advertiser)).size
         : 1;
 
-      // 실제 노출 광고 수 계산 (현재는 성공한 스케줄 수로 임시 설정)
-      // 향후 MediaTailor CloudWatch Logs의 FILLED_AVAIL 이벤트로 대체 예정
-      const actualExposedAds = successfulImpressions;
+      // MediaTailor 로그 데이터에서 실제 노출 광고 수 및 당일 FILLED_AVAIL 횟수 계산
+      let actualExposedAds = successfulImpressions; // 기본값 (fallback)
+      let dailyFilledAvails = 0; // 기본값
+      let actualSuccessRate = totalImpressions > 0 ? (successfulImpressions / totalImpressions * 100).toFixed(1) : 0;
 
-      // 성공률 계산: 실제 노출 광고수 / 총 광고 노출수 * 100
-      const actualSuccessRate = totalImpressions > 0 ? (actualExposedAds / totalImpressions * 100).toFixed(1) : 0;
+      if (mediaTailorData) {
+        // MediaTailor 로그 데이터가 있는 경우 실제 데이터 사용
+        actualExposedAds = mediaTailorData.actualExposedAds || actualExposedAds;
+        dailyFilledAvails = mediaTailorData.dailyFilledAvails || 0;
+        
+        // MediaTailor 기준 성공률 사용 (실제 노출 / 총 요청)
+        if (mediaTailorData.successRate !== undefined) {
+          actualSuccessRate = mediaTailorData.successRate;
+        } else if (totalImpressions > 0) {
+          actualSuccessRate = (actualExposedAds / totalImpressions * 100).toFixed(1);
+        }
 
-      // 당일 FILLED_AVAIL 횟수 계산 (현재는 오늘 날짜의 성공한 스케줄로 임시 설정)
-      // 향후 MediaTailor CloudWatch Logs의 당일 FILLED_AVAIL 이벤트로 대체 예정
-      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD 형식
-      const todaySuccessfulSchedules = filteredSchedulesForStats.filter(schedule => {
-        const scheduleDate = schedule.schedule_time.split('T')[0];
-        return scheduleDate === today && schedule.status === 'completed';
-      });
-      const dailyFilledAvails = todaySuccessfulSchedules.length;
+        console.log('Using MediaTailor data:', {
+          actualExposedAds,
+          dailyFilledAvails,
+          successRate: actualSuccessRate,
+          totalRequests: mediaTailorData.totalRequests
+        });
+      } else {
+        // MediaTailor 로그가 없는 경우 DynamoDB 스케줄 데이터로 fallback
+        console.log('Using fallback data from DynamoDB schedules');
+        
+        // 당일 FILLED_AVAIL 횟수 계산 (당일 성공한 스케줄로 대체)
+        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD 형식
+        const todaySuccessfulSchedules = filteredSchedulesForStats.filter(schedule => {
+          const scheduleDate = schedule.schedule_time.split('T')[0];
+          return scheduleDate === today && schedule.status === 'completed';
+        });
+        dailyFilledAvails = todaySuccessfulSchedules.length;
+      }
 
       setAdPerformanceData({
         totalImpressions,

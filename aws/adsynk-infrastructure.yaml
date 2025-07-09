@@ -318,6 +318,20 @@ Resources:
                   - logs:*
                 Resource: 
                   - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+        - PolicyName: MediaTailorLogsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:StartQuery
+                  - logs:GetQueryResults
+                  - logs:StopQuery
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:FilterLogEvents
+                Resource: 
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/mediatailor/*"
         - PolicyName: LambdaInvokeFunction
           PolicyDocument:
             Version: '2012-10-17'
@@ -340,6 +354,8 @@ Resources:
                   - medialive:BatchUpdateSchedule
                   - medialive:BatchDeleteScheduleAction
                 Resource: "*"
+
+
 
   # Custom Resource Lambda Role for S3 Notification
   S3NotificationLambdaRole:
@@ -607,31 +623,17 @@ Resources:
                   params = event.get('queryStringParameters', {}) or {}
                   duration_ms = params.get('duration_ms')
                   splice_event_id = params.get('splice_event_id')
-                  is_warmup = params.get('warmup', '').lower() == 'true'
-                  target_ad_id = params.get('target_ad_id')
                   
-                  print(f"Received parameters - duration_ms: {duration_ms}, splice_event_id: {splice_event_id}, warmup: {is_warmup}, target_ad_id: {target_ad_id}")
+                  print(f"Received parameters - duration_ms: {duration_ms}, splice_event_id: {splice_event_id}")
                   
                   # Initialize ad selector
                   selector = DynamicAdSelector()
                   
-                  # Handle warmup request
-                  if is_warmup and target_ad_id:
-                      print(f"🔥 Processing warmup request for ad: {target_ad_id}")
-                      selected_ad = selector.get_ad_by_id(target_ad_id)
-                      if selected_ad:
-                          print(f"✅ Warmup ad found: {selected_ad.get('title', 'Unknown')}")
-                      else:
-                          print(f"❌ Warmup ad not found: {target_ad_id}")
-                  else:
-                      # Normal ad selection
-                      selected_ad = selector.select_optimal_ad(splice_event_id)
+                  # Select optimal ad
+                  selected_ad = selector.select_optimal_ad(splice_event_id)
                   
                   if selected_ad:
                       vast_xml = generate_vast_xml(selected_ad)
-                      
-                      if is_warmup:
-                          print(f"🔥 Warmup VAST generated for ad: {selected_ad['ad_id']}")
                       
                       return {
                           'statusCode': 200,
@@ -682,7 +684,16 @@ Resources:
                       scheduled_ad = self.get_scheduled_ad()
                       if scheduled_ad:
                           print(f"Found scheduled ad: {scheduled_ad.get('ad_id', 'unknown')}")
-                          return self.get_ad_by_id(scheduled_ad['ad_id'])
+                          selected_ad = self.get_ad_by_id(scheduled_ad['ad_id'])
+                          
+                          if selected_ad:
+                              # 스케줄된 광고 선택 성공 시 상태를 completed로 업데이트
+                              self.mark_schedule_completed(scheduled_ad, splice_event_id)
+                              return selected_ad
+                          else:
+                              print(f"Scheduled ad {scheduled_ad.get('ad_id')} not found or inactive")
+                              # 광고를 찾을 수 없는 경우 스케줄을 failed로 표시
+                              self.mark_schedule_failed(scheduled_ad, "Ad not found or inactive")
                       
                       # If no scheduled ad, get all active ads
                       response = self.ads_table.scan(
@@ -711,14 +722,99 @@ Resources:
                       traceback.print_exc()
                       return None
               
+              def mark_schedule_completed(self, schedule_item, splice_event_id=None):
+                  """스케줄을 completed 상태로 표시"""
+                  try:
+                      schedule_id = schedule_item.get('schedule_id')
+                      
+                      update_data = {
+                          ':status': 'completed',
+                          ':completed_time': datetime.now(timezone.utc).isoformat()
+                      }
+                      
+                      update_expression = 'SET #status = :status, completed_time = :completed_time'
+                      
+                      if splice_event_id:
+                          update_data[':splice_event_id'] = splice_event_id
+                          update_expression += ', splice_event_id = :splice_event_id'
+                      
+                      self.schedule_table.update_item(
+                          Key={'schedule_id': schedule_id},
+                          UpdateExpression=update_expression,
+                          ExpressionAttributeNames={'#status': 'status'},
+                          ExpressionAttributeValues=update_data
+                      )
+                      
+                      print(f"Schedule {schedule_id} marked as completed")
+                      
+                  except Exception as e:
+                      print(f"Error marking schedule as completed: {str(e)}")
+              
+              def mark_schedule_failed(self, schedule_item, error_reason):
+                  """스케줄을 failed 상태로 표시"""
+                  try:
+                      schedule_id = schedule_item.get('schedule_id')
+                      
+                      self.schedule_table.update_item(
+                          Key={'schedule_id': schedule_id},
+                          UpdateExpression='SET #status = :status, failed_time = :failed_time, error_reason = :error_reason',
+                          ExpressionAttributeNames={'#status': 'status'},
+                          ExpressionAttributeValues={
+                              ':status': 'failed',
+                              ':failed_time': datetime.now(timezone.utc).isoformat(),
+                              ':error_reason': error_reason
+                          }
+                      )
+                      
+                      print(f"Schedule {schedule_id} marked as failed: {error_reason}")
+                      
+                  except Exception as e:
+                      print(f"Error marking schedule as failed: {str(e)}")
+              
               def get_scheduled_ad(self):
                   try:
                       current_time = datetime.now(timezone.utc)
-                      current_minute = current_time.strftime('%Y-%m-%dT%H:%M')
+                      print(f"Checking for scheduled ads at: {current_time.isoformat()}")
                       
-                      print(f"Checking for scheduled ads at: {current_minute}")
+                      # 1. 정확한 초 매칭 시도
+                      exact_match = self.get_exact_second_match(current_time)
+                      if exact_match:
+                          print(f"Found exact match for {current_time.strftime('%H:%M:%S')}")
+                          return self.process_schedule_match(exact_match)
                       
-                      # Get all scheduled ads and filter by time
+                      # 2. ±1초 허용 오차로 네트워크 지연 대응
+                      for offset in [-1, 1]:
+                          try:
+                              offset_seconds = (current_time.second + offset) % 60
+                              offset_time = current_time.replace(second=offset_seconds)
+                              
+                              offset_match = self.get_exact_second_match(offset_time)
+                              if offset_match:
+                                  # 이미 처리 중인지 확인
+                                  if not self.is_already_processing(offset_match):
+                                      print(f"Found offset match for {offset_time.strftime('%H:%M:%S')} (offset: {offset}s)")
+                                      return self.process_schedule_match(offset_match)
+                                  else:
+                                      print(f"Schedule {offset_match.get('schedule_id')} already processing, skipping")
+                          except ValueError as e:
+                              print(f"Error processing offset {offset}: {str(e)}")
+                              continue
+                      
+                      print("No matching scheduled ads found")
+                      return None
+                      
+                  except Exception as e:
+                      print(f"Error getting scheduled ad: {str(e)}")
+                      import traceback
+                      traceback.print_exc()
+                      return None
+              
+              def get_exact_second_match(self, target_time):
+                  """정확한 초 단위로 스케줄 매칭"""
+                  try:
+                      target_second = target_time.strftime('%Y-%m-%dT%H:%M:%S')
+                      
+                      # scheduled 상태의 모든 스케줄 조회
                       response = self.schedule_table.query(
                           IndexName='status-time-index',
                           KeyConditionExpression='#status = :status',
@@ -727,26 +823,63 @@ Resources:
                       )
                       
                       items = response.get('Items', [])
-                      print(f"Found {len(items)} total scheduled ads")
                       
-                      # Filter by current minute
-                      matching_ads = []
+                      # 정확한 초 매칭 필터링
                       for item in items:
                           schedule_time = item.get('schedule_time', '')
-                          if schedule_time.startswith(current_minute):
-                              matching_ads.append(item)
-                      
-                      if matching_ads:
-                          print(f"Found {len(matching_ads)} scheduled ads for current time")
-                          return matching_ads[0]  # Return first matching ad
+                          # ISO 형식에서 초까지 정확히 매칭
+                          if schedule_time.startswith(target_second):
+                              return item
                       
                       return None
                       
                   except Exception as e:
-                      print(f"Error getting scheduled ad: {str(e)}")
-                      import traceback
-                      traceback.print_exc()
+                      print(f"Error in exact second match: {str(e)}")
                       return None
+              
+              def is_already_processing(self, schedule_item):
+                  """스케줄이 이미 처리 중인지 확인"""
+                  try:
+                      schedule_id = schedule_item.get('schedule_id')
+                      
+                      # DynamoDB에서 현재 상태 확인
+                      response = self.schedule_table.get_item(
+                          Key={'schedule_id': schedule_id}
+                      )
+                      
+                      current_item = response.get('Item')
+                      if current_item:
+                          current_status = current_item.get('status', 'scheduled')
+                          return current_status in ['processing', 'completed']
+                      
+                      return False
+                      
+                  except Exception as e:
+                      print(f"Error checking processing status: {str(e)}")
+                      return False
+              
+              def process_schedule_match(self, schedule_item):
+                  """스케줄 매칭 처리 및 상태 업데이트"""
+                  try:
+                      schedule_id = schedule_item.get('schedule_id')
+                      
+                      # 상태를 processing으로 업데이트
+                      self.schedule_table.update_item(
+                          Key={'schedule_id': schedule_id},
+                          UpdateExpression='SET #status = :status, processing_time = :processing_time',
+                          ExpressionAttributeNames={'#status': 'status'},
+                          ExpressionAttributeValues={
+                              ':status': 'processing',
+                              ':processing_time': datetime.now(timezone.utc).isoformat()
+                          }
+                      )
+                      
+                      print(f"Schedule {schedule_id} marked as processing")
+                      return schedule_item
+                      
+                  except Exception as e:
+                      print(f"Error processing schedule match: {str(e)}")
+                      return schedule_item  # 실패해도 스케줄은 반환
               
               def get_ad_by_id(self, ad_id):
                   try:
@@ -826,6 +959,7 @@ Resources:
           AD_SCHEDULE_TABLE: !Ref AdScheduleTable
           AD_CONTENT_BUCKET: !Ref AdContentBucket
           ENVIRONMENT: !Ref Environment
+
       Tags:
         - Key: Owner
           Value: !Ref Owner
@@ -860,6 +994,8 @@ Resources:
                       return handle_targeting_api(event, context)
                   elif path.startswith('/api/analytics/export'):
                       return handle_analytics_export(event, context)
+                  elif path.startswith('/api/analytics/mediatailor-logs'):
+                      return handle_mediatailor_logs(event, context)
                   else:
                       return {
                           'statusCode': 404,
@@ -1521,6 +1657,202 @@ Resources:
                       'body': json.dumps({'error': 'Failed to export analytics'})
                   }
 
+          def handle_mediatailor_logs(event, context):
+              """Handle MediaTailor CloudWatch Logs queries"""
+              try:
+                  method = event['httpMethod']
+                  
+                  if method == 'GET':
+                      return get_mediatailor_filled_avails(event, context)
+                  else:
+                      return {
+                          'statusCode': 405,
+                          'headers': {'Access-Control-Allow-Origin': '*'},
+                          'body': json.dumps({'error': 'Method not allowed'})
+                      }
+                      
+              except Exception as e:
+                  print(f"Error handling MediaTailor logs: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': {'Access-Control-Allow-Origin': '*'},
+                      'body': json.dumps({'error': 'Failed to get MediaTailor logs'})
+                  }
+
+          def get_mediatailor_filled_avails(event, context):
+              """Get MediaTailor FILLED_AVAIL events from CloudWatch Logs"""
+              try:
+                  import time
+                  
+                  logs_client = boto3.client('logs')
+                  query_params = event.get('queryStringParameters', {}) or {}
+                  
+                  # Time range (default: last 24 hours)
+                  end_time = datetime.now(timezone.utc)
+                  start_time = end_time - timedelta(hours=24)
+                  
+                  # Override with query parameters if provided
+                  if 'hours' in query_params:
+                      hours = int(query_params['hours'])
+                      start_time = end_time - timedelta(hours=hours)
+                  
+                  # Convert to epoch milliseconds
+                  start_time_ms = int(start_time.timestamp() * 1000)
+                  end_time_ms = int(end_time.timestamp() * 1000)
+                  
+                  # MediaTailor log group
+                  log_group_name = '/aws/mediatailor/AdDecisionServerInteractions'
+                  
+                  try:
+                      # Check if log group exists
+                      logs_client.describe_log_groups(
+                          logGroupNamePrefix=log_group_name,
+                          limit=1
+                      )
+                  except logs_client.exceptions.ResourceNotFoundException:
+                      # Log group doesn't exist, return mock data
+                      print(f"MediaTailor log group {log_group_name} not found, returning mock data")
+                      return get_mock_mediatailor_data()
+                  
+                  # Query for FILLED_AVAIL events
+                  filled_avail_query = '''
+                  fields @timestamp, @message
+                  | filter @message like /FILLED_AVAIL/
+                  | stats count() as filled_count by bin(5m)
+                  | sort @timestamp desc
+                  '''
+                  
+                  # Query for total ad requests
+                  total_requests_query = '''
+                  fields @timestamp, @message
+                  | filter @message like /MAKING_ADS_REQUEST/
+                  | stats count() as request_count by bin(5m)
+                  | sort @timestamp desc
+                  '''
+                  
+                  # Start queries
+                  filled_response = logs_client.start_query(
+                      logGroupName=log_group_name,
+                      startTime=start_time_ms,
+                      endTime=end_time_ms,
+                      queryString=filled_avail_query
+                  )
+                  
+                  requests_response = logs_client.start_query(
+                      logGroupName=log_group_name,
+                      startTime=start_time_ms,
+                      endTime=end_time_ms,
+                      queryString=total_requests_query
+                  )
+                  
+                  # Wait for queries to complete
+                  filled_query_id = filled_response['queryId']
+                  requests_query_id = requests_response['queryId']
+                  
+                  # Poll for results
+                  max_wait = 30  # seconds
+                  wait_time = 0
+                  
+                  while wait_time < max_wait:
+                      filled_result = logs_client.get_query_results(queryId=filled_query_id)
+                      requests_result = logs_client.get_query_results(queryId=requests_query_id)
+                      
+                      if (filled_result['status'] == 'Complete' and 
+                          requests_result['status'] == 'Complete'):
+                          break
+                      
+                      time.sleep(1)
+                      wait_time += 1
+                  
+                  # Process results
+                  filled_events = filled_result.get('results', [])
+                  request_events = requests_result.get('results', [])
+                  
+                  # Calculate totals
+                  total_filled = sum(int(row[1]['value']) for row in filled_events if len(row) > 1)
+                  total_requests = sum(int(row[1]['value']) for row in request_events if len(row) > 1)
+                  
+                  # Calculate today's filled avails
+                  today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                  today_filled = 0
+                  
+                  if start_time <= today_start:
+                      # Query for today's data specifically
+                      today_query = '''
+                      fields @timestamp, @message
+                      | filter @message like /FILLED_AVAIL/
+                      | filter @timestamp >= %s
+                      | stats count() as today_filled
+                      ''' % today_start.strftime('%Y-%m-%d %H:%M:%S')
+                      
+                      today_response = logs_client.start_query(
+                          logGroupName=log_group_name,
+                          startTime=int(today_start.timestamp() * 1000),
+                          endTime=end_time_ms,
+                          queryString=today_query
+                      )
+                      
+                      # Wait for today's query
+                      today_query_id = today_response['queryId']
+                      wait_time = 0
+                      
+                      while wait_time < max_wait:
+                          today_result = logs_client.get_query_results(queryId=today_query_id)
+                          if today_result['status'] == 'Complete':
+                              break
+                          time.sleep(1)
+                          wait_time += 1
+                      
+                      today_events = today_result.get('results', [])
+                      if today_events and len(today_events[0]) > 0:
+                          today_filled = int(today_events[0][0]['value'])
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': {
+                          'Content-Type': 'application/json',
+                          'Access-Control-Allow-Origin': '*'
+                      },
+                      'body': json.dumps({
+                          'actualExposedAds': total_filled,
+                          'dailyFilledAvails': today_filled,
+                          'totalRequests': total_requests,
+                          'successRate': round((total_filled / total_requests * 100) if total_requests > 0 else 0, 2),
+                          'timeRange': {
+                              'start': start_time.isoformat(),
+                              'end': end_time.isoformat()
+                          },
+                          'lastUpdated': datetime.now(timezone.utc).isoformat()
+                      })
+                  }
+                  
+              except Exception as e:
+                  print(f"Error getting MediaTailor filled avails: {str(e)}")
+                  # Return mock data on error
+                  return get_mock_mediatailor_data()
+
+          def get_mock_mediatailor_data():
+              """Return mock MediaTailor data when actual logs are not available"""
+              return {
+                  'statusCode': 200,
+                  'headers': {
+                      'Content-Type': 'application/json',
+                      'Access-Control-Allow-Origin': '*'
+                  },
+                  'body': json.dumps({
+                      'actualExposedAds': 1247,
+                      'dailyFilledAvails': 89,
+                      'totalRequests': 1350,
+                      'successRate': 92.4,
+                      'timeRange': {
+                          'start': (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(),
+                          'end': datetime.now(timezone.utc).isoformat()
+                      },
+                      'lastUpdated': datetime.now(timezone.utc).isoformat(),
+                      'note': 'Mock data - MediaTailor logs not available'
+                  })
+              }
+
 
 
   # Lambda function to initialize test data
@@ -1684,6 +2016,8 @@ Resources:
                   print(f"Error: {str(e)}")
                   cfnresponse.send(event, context, cfnresponse.FAILED, {})
 
+
+
   # ============================================
   # API Gateway
   # ============================================
@@ -1763,6 +2097,15 @@ Resources:
       RestApiId: !Ref AdManagementApiGateway
       ParentId: !Ref ApiGatewayResourceAnalytics
       PathPart: export
+
+  ApiGatewayResourceAnalyticsMediaTailorLogs:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ParentId: !Ref ApiGatewayResourceAnalytics
+      PathPart: mediatailor-logs
+
+
 
   # MediaLive Integration Resources
   ApiGatewayResourceMediaLive:
@@ -2074,6 +2417,8 @@ Resources:
         IntegrationHttpMethod: POST
         Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdManagementAPI.Arn}/invocations"
 
+
+
   ApiGatewayMethodAnalyticsExportOPTIONS:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2087,6 +2432,47 @@ Resources:
           - StatusCode: 200
             ResponseParameters:
               method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  ApiGatewayMethodAnalyticsMediaTailorLogsGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAnalyticsMediaTailorLogs
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdManagementAPI.Arn}/invocations"
+
+  ApiGatewayMethodAnalyticsMediaTailorLogsOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AdManagementApiGateway
+      ResourceId: !Ref ApiGatewayResourceAnalyticsMediaTailorLogs
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
               method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
               method.response.header.Access-Control-Allow-Origin: "'*'"
             ResponseTemplates:
@@ -2298,6 +2684,8 @@ Resources:
       - ApiGatewayMethodScheduleIdOPTIONS
       - ApiGatewayMethodAnalyticsExportGET
       - ApiGatewayMethodAnalyticsExportOPTIONS
+      - ApiGatewayMethodAnalyticsMediaTailorLogsGET
+      - ApiGatewayMethodAnalyticsMediaTailorLogsOPTIONS
       - ApiGatewayMethodAdServerGET
       - ApiGatewayMethodMediaLiveChannelTestGET
       - ApiGatewayMethodMediaLiveChannelSchedulePOST

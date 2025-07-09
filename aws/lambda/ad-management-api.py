@@ -2,6 +2,7 @@ import json
 import boto3
 import csv
 import io
+import os
 from datetime import datetime, timedelta
 from decimal import Decimal
 import logging
@@ -14,10 +15,11 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 s3 = boto3.client('s3')
 
-# Table names (will be replaced by environment variables)
-AD_INVENTORY_TABLE = 'Adsynk-AdInventory'
-AD_PERFORMANCE_TABLE = 'Adsynk-AdPerformance'
-AD_SCHEDULE_TABLE = 'Adsynk-AdSchedule'
+# Table names from environment variables
+AD_INVENTORY_TABLE = os.environ.get('AD_INVENTORY_TABLE', 'Adsynk-AdInventory')
+AD_PERFORMANCE_TABLE = os.environ.get('AD_PERFORMANCE_TABLE', 'Adsynk-AdPerformance')
+AD_SCHEDULE_TABLE = os.environ.get('AD_SCHEDULE_TABLE', 'Adsynk-AdSchedule')
+CLOUDWATCH_LOGS_ANALYZER_FUNCTION = os.environ.get('CLOUDWATCH_LOGS_ANALYZER_FUNCTION', 'Adsynk-CloudWatchLogsAnalyzer')
 
 def lambda_handler(event, context):
     """Main Lambda handler for Ad Management API"""
@@ -39,6 +41,10 @@ def lambda_handler(event, context):
             return handle_schedule_api(http_method, path, query_parameters)
         elif path.startswith('/api/analytics/export'):
             return handle_analytics_export(http_method, path, query_parameters)
+        elif path.startswith('/api/analytics/realtime'):
+            return handle_realtime_analytics(http_method, path, query_parameters)
+        elif path.startswith('/api/analytics/mediatailor'):
+            return handle_mediatailor_analytics(http_method, path, query_parameters)
         else:
             return create_response(404, {'error': 'Endpoint not found'})
             
@@ -388,6 +394,96 @@ def create_csv_response(csv_data, filename):
         },
         'body': csv_data
     }
+
+def handle_realtime_analytics(http_method, path, query_parameters):
+    """Handle realtime analytics API endpoints"""
+    if http_method == 'GET':
+        return get_realtime_metrics(query_parameters)
+    else:
+        return create_response(405, {'error': 'Method not allowed'})
+
+def handle_mediatailor_analytics(http_method, path, query_parameters):
+    """Handle MediaTailor analytics API endpoints"""
+    if http_method == 'GET':
+        return get_mediatailor_logs(query_parameters)
+    else:
+        return create_response(405, {'error': 'Method not allowed'})
+
+def get_realtime_metrics(query_parameters):
+    """Get realtime metrics by calling CloudWatch Logs Analyzer Lambda"""
+    try:
+        # CloudWatch Logs Analyzer Lambda 함수 호출
+        lambda_client = boto3.client('lambda')
+        
+        # 함수 이름 (환경변수에서 가져옴)
+        function_name = CLOUDWATCH_LOGS_ANALYZER_FUNCTION
+        
+        # 요청 페이로드 구성 (Lambda-to-Lambda 호출)
+        payload = {
+            'action': 'get_realtime_metrics',
+            'queryStringParameters': query_parameters
+        }
+        
+        # Lambda 함수 호출
+        response = lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType='RequestResponse',
+            Payload=json.dumps(payload)
+        )
+        
+        # 응답 처리
+        response_payload = json.loads(response['Payload'].read())
+        
+        if response_payload.get('statusCode') == 200:
+            body = json.loads(response_payload['body'])
+            return create_response(200, body)
+        else:
+            return create_response(
+                response_payload.get('statusCode', 500),
+                json.loads(response_payload.get('body', '{"error": "Unknown error"}'))
+            )
+            
+    except Exception as e:
+        logger.error(f"Error getting realtime metrics: {str(e)}")
+        return create_response(500, {'error': 'Failed to get realtime metrics'})
+
+def get_mediatailor_logs(query_parameters):
+    """Get MediaTailor logs by calling CloudWatch Logs Analyzer Lambda"""
+    try:
+        # CloudWatch Logs Analyzer Lambda 함수 호출
+        lambda_client = boto3.client('lambda')
+        
+        # 함수 이름 (환경변수에서 가져옴)
+        function_name = CLOUDWATCH_LOGS_ANALYZER_FUNCTION
+        
+        # 요청 페이로드 구성 (Lambda-to-Lambda 호출)
+        payload = {
+            'action': 'get_mediatailor_analytics',
+            'queryStringParameters': query_parameters
+        }
+        
+        # Lambda 함수 호출
+        response = lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType='RequestResponse',
+            Payload=json.dumps(payload)
+        )
+        
+        # 응답 처리
+        response_payload = json.loads(response['Payload'].read())
+        
+        if response_payload.get('statusCode') == 200:
+            body = json.loads(response_payload['body'])
+            return create_response(200, body)
+        else:
+            return create_response(
+                response_payload.get('statusCode', 500),
+                json.loads(response_payload.get('body', '{"error": "Unknown error"}'))
+            )
+            
+    except Exception as e:
+        logger.error(f"Error getting MediaTailor logs: {str(e)}")
+        return create_response(500, {'error': 'Failed to get MediaTailor logs'})
 
 def create_response(status_code, body):
     """Create a standard JSON response"""

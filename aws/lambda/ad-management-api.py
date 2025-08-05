@@ -16,10 +16,10 @@ dynamodb = boto3.resource('dynamodb')
 s3 = boto3.client('s3')
 
 # Table names from environment variables
-AD_INVENTORY_TABLE = os.environ.get('AD_INVENTORY_TABLE', 'Adsynk-AdInventory')
-AD_PERFORMANCE_TABLE = os.environ.get('AD_PERFORMANCE_TABLE', 'Adsynk-AdPerformance')
-AD_SCHEDULE_TABLE = os.environ.get('AD_SCHEDULE_TABLE', 'Adsynk-AdSchedule')
-CLOUDWATCH_LOGS_ANALYZER_FUNCTION = os.environ.get('CLOUDWATCH_LOGS_ANALYZER_FUNCTION', 'Adsynk-CloudWatchLogsAnalyzer')
+AD_INVENTORY_TABLE = os.environ.get('AD_INVENTORY_TABLE', 'SpaceAds-AdInventory')
+AD_PERFORMANCE_TABLE = os.environ.get('AD_PERFORMANCE_TABLE', 'SpaceAds-AdPerformance')
+AD_SCHEDULE_TABLE = os.environ.get('AD_SCHEDULE_TABLE', 'SpaceAds-AdSchedule')
+CLOUDWATCH_LOGS_ANALYZER_FUNCTION = os.environ.get('CLOUDWATCH_LOGS_ANALYZER_FUNCTION', 'SpaceAds-CloudWatchLogsAnalyzer')
 
 def lambda_handler(event, context):
     """Main Lambda handler for Ad Management API"""

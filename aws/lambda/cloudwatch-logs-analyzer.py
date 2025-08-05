@@ -276,7 +276,7 @@ def get_schedule_success_rate(start_time: datetime, end_time: datetime) -> float
     """DynamoDB에서 스케줄 성공률 조회"""
     try:
         dynamodb = boto3.resource('dynamodb')
-        schedule_table = dynamodb.Table('Adsynk-AdSchedule')  # 환경변수로 변경 필요
+        schedule_table = dynamodb.Table('SpaceAds-AdSchedule')  # 환경변수로 변경 필요
         
         # 시간 범위 내의 스케줄 조회
         response = schedule_table.scan(

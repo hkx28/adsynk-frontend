@@ -1,9 +1,9 @@
-# Adsynk API Documentation
+# SpaceAds API Documentation
 
 ## 📋 개요
 
-**Adsynk**는 AWS MediaTailor와 MediaLive를 활용한 실시간 동적 광고 삽입 시스템입니다. 
-이 문서는 Adsynk에서 제공하는 모든 REST API 엔드포인트에 대한 상세한 사용법을 제공합니다.
+**SpaceAds**는 AWS MediaTailor와 MediaLive를 활용한 실시간 동적 광고 삽입 시스템입니다.
+이 문서는 SpaceAds에서 제공하는 모든 REST API 엔드포인트에 대한 상세한 사용법을 제공합니다.
 
 ### 기본 정보
 - **Base URL**: `https://your-api-domain.com`
@@ -425,7 +425,7 @@ curl -X DELETE "https://your-api-domain.com/medialive/channel/5119356/schedule/m
 ```bash
 curl -X GET "https://your-api-domain.com/api/analytics/export?start=2025-01-01&end=2025-01-31" \
   -H "Content-Type: application/json" \
-  -o "adsynk_analytics.csv"
+  -o "spaceads_analytics.csv"
 ```
 
 #### Query 파라미터
@@ -603,6 +603,103 @@ curl -X GET "https://your-api-domain.com/adserver?avail.duration=30" \
 
 ---
 
+## 📊 분석 및 모니터링 API
+
+### 1. CSV 데이터 내보내기
+
+**GET** `/api/analytics/export`
+
+광고 성과 데이터를 CSV 형식으로 내보냅니다.
+
+#### 요청 예시
+```bash
+curl -X GET "https://your-api-domain.com/api/analytics/export?start=2025-01-01&end=2025-01-31" \
+  -H "Content-Type: application/json" \
+  -o "ad_analytics.csv"
+```
+
+#### 쿼리 파라미터
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `start` | string | ❌ | 시작 날짜 (YYYY-MM-DD, 기본값: 30일 전) |
+| `end` | string | ❌ | 종료 날짜 (YYYY-MM-DD, 기본값: 오늘) |
+
+#### CSV 형식
+```csv
+Ad ID,Ad Name,Advertiser,Insertions,Success,Failure,Success Rate (%),Total Duration (sec)
+ad_001,Sample Ad,Example Corp,150,145,5,96.7,4500
+ad_002,Campaign Video,Brand Co,89,85,4,95.5,2670
+```
+
+---
+
+### 2. MediaTailor 로그 분석
+
+**GET** `/api/analytics/mediatailor-logs`
+
+MediaTailor CloudWatch Logs에서 실제 광고 노출 데이터를 조회합니다.
+
+#### 요청 예시
+```bash
+curl -X GET "https://your-api-domain.com/api/analytics/mediatailor-logs?hours=24" \
+  -H "Content-Type: application/json"
+```
+
+#### 쿼리 파라미터
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `hours` | integer | ❌ | 조회 시간 범위 (기본값: 24시간) |
+
+#### 응답 예시
+```json
+{
+  "actualExposedAds": 1247,
+  "dailyFilledAvails": 89,
+  "totalRequests": 1350,
+  "successRate": 92.4,
+  "timeRange": {
+    "start": "2025-01-15T00:00:00Z",
+    "end": "2025-01-16T00:00:00Z"
+  },
+  "lastUpdated": "2025-01-16T10:30:00Z"
+}
+```
+
+#### 응답 필드
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `actualExposedAds` | integer | 실제 노출된 광고 수 (FILLED_AVAIL 이벤트 기준) |
+| `dailyFilledAvails` | integer | 당일 실제 노출 횟수 |
+| `totalRequests` | integer | 총 광고 요청 수 (MAKING_ADS_REQUEST 이벤트 기준) |
+| `successRate` | number | 실제 성공률 (actualExposedAds / totalRequests × 100) |
+| `timeRange` | object | 조회 시간 범위 |
+| `lastUpdated` | string | 마지막 업데이트 시간 |
+
+#### MediaTailor 로그 이벤트 타입
+- **FILLED_AVAIL**: 광고가 성공적으로 삽입된 경우
+- **MAKING_ADS_REQUEST**: 광고 서버에 요청을 보내는 경우
+- **EMPTY_AVAIL**: 광고 슬롯이 비어있는 경우
+
+#### Fallback 처리
+MediaTailor 로그가 없는 경우 DynamoDB 스케줄 데이터를 사용하여 대체 데이터를 제공합니다:
+
+```json
+{
+  "actualExposedAds": 95,
+  "dailyFilledAvails": 12,
+  "totalRequests": 100,
+  "successRate": 95.0,
+  "timeRange": {
+    "start": "2025-01-15T00:00:00Z",
+    "end": "2025-01-16T00:00:00Z"
+  },
+  "lastUpdated": "2025-01-16T10:30:00Z",
+  "note": "Mock data - MediaTailor logs not available"
+}
+```
+
+---
+
 ## 🔧 개발자 가이드
 
 ### 1. 통합 워크플로우 예시
@@ -714,41 +811,49 @@ async function retryRequest(fn, maxRetries = 3) {
 ## 📞 지원 및 문의
 
 ### 기술 지원
-- **이메일**: support@adsynk.com
-- **문서**: [https://docs.adsynk.com](https://docs.adsynk.com)
-- **GitHub**: [https://github.com/adsynk/api-examples](https://github.com/adsynk/api-examples)
+- **이메일**: support@spaceads.com
+- **문서**: [https://docs.spaceads.com](https://docs.spaceads.com)
+- **GitHub**: [https://github.com/spaceads/api-examples](https://github.com/spaceads/api-examples)
 
 ### 버전 정보
-- **현재 버전**: 1.0.0
-- **마지막 업데이트**: 2025년 1월 16일 (Phase 16 - CSV 다운로드 시스템 개선)
-- **호환성**: AWS MediaLive, MediaTailor
+- **현재 버전**: 1.1.0
+- **마지막 업데이트**: 2025년 1월 16일 (Phase 17 - MediaTailor CloudWatch Logs 연동)
+- **호환성**: AWS MediaLive, MediaTailor, CloudWatch Logs
 
-### 최근 업데이트 (Phase 16)
-#### CSV 다운로드 시스템 개선
+### 최근 업데이트 (Phase 17)
+#### MediaTailor CloudWatch Logs 연동 구현
+- ✅ **실제 광고 노출 데이터**: MediaTailor FILLED_AVAIL 이벤트 기반 모니터링
+- ✅ **CloudWatch Logs 분석**: `/aws/mediatailor/AdDecisionServerInteractions` 로그 그룹 조회
+- ✅ **새로운 API 엔드포인트**: `/api/analytics/mediatailor-logs` 추가
+- ✅ **실시간 모니터링 제거**: 복잡한 실시간 시스템을 단순한 6개 카드로 대체
+- ✅ **Fallback 처리**: MediaTailor 로그 없을 때 DynamoDB 데이터 사용
+- ✅ **성공률 계산 개선**: 실제 노출 / 총 요청 기준으로 변경
+
+#### 새로운 모니터링 카드 시스템
+1. **Total Ad Impressions** (📺) - 총 광고 노출 수
+2. **Actual Exposed Ads** (📡) - 실제 노출 광고 수 (MediaTailor FILLED_AVAIL)
+3. **Success Rate** (🎯) - 성공률 (실제 노출/총 노출)
+4. **Today's Filled Avails** (📈) - 당일 실제 노출 횟수
+5. **Avg Ad Duration** (⏱️) - 평균 광고 길이
+6. **Active Advertisers** (🏢) - 활성 광고주 수
+
+#### MediaTailor 로그 이벤트 처리
+- **FILLED_AVAIL**: 광고 성공적 삽입 이벤트 카운트
+- **MAKING_ADS_REQUEST**: 총 광고 요청 이벤트 카운트
+- **실시간 성공률**: (FILLED_AVAIL / MAKING_ADS_REQUEST) × 100
+- **당일 노출 횟수**: 당일 FILLED_AVAIL 이벤트 카운트
+
+#### 이전 업데이트 (Phase 16)
+##### CSV 다운로드 시스템 개선
 - ✅ **데이터 소스 통합**: `AdPerformanceTable` → `AdScheduleTable` 변경
 - ✅ **컬럼명 영문화**: 국제화 지원을 위한 영문 헤더 적용
 - ✅ **데이터 일관성**: 모니터링 페이지와 CSV 내보내기 동일한 데이터 소스 사용
 - ✅ **성능 계산 로직**: 스케줄 상태 기반 성공/실패 계산
-- ✅ **오류 해결**: `handle_analytics_export` 함수 정의 누락 문제 해결
-
-#### 변경된 CSV 형식
-```csv
-# 이전 (한글 헤더)
-광고ID,광고명,광고사업자,삽입횟수,성공횟수,실패횟수,성공률(%),총지속시간(초)
-
-# 현재 (영문 헤더)
-Ad ID,Ad Name,Advertiser,Insertions,Success,Failure,Success Rate (%),Total Duration (sec)
-```
-
-#### 개선된 데이터 정확성
-- **실제 스케줄 데이터 반영**: 더이상 빈 데이터가 아닌 실제 광고 삽입 이력 제공
-- **상태 기반 계산**: `completed` 상태를 성공으로, 기타 상태를 실패로 분류
-- **모니터링 일치**: 웹 인터페이스와 CSV 데이터 완전 일치
 
 ### 라이센스
 본 API는 상업적 라이센스 하에 제공됩니다. 자세한 내용은 라이센스 문서를 참조하세요.
 
 ---
 
-**© 2025 Adsynk. All rights reserved.**  
+**© 2025 SpaceAds. All rights reserved.**  
 **Originally developed for demonstration at MEGAZONECLOUD.** 
